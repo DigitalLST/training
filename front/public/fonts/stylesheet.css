@@ -1,0 +1,39 @@
+@font-face {
+  font-family: 'ElMessiri-Bold';
+  src: url('ElMessiri-Bold.ttf');
+  src: url('ElMessiri-Bold.ttf') format('embedded-opentype'),
+    url('ElMessiri-Bold.ttf') format('truetype');
+
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'ElMessiri-Medium';
+  src: url('ElMessiri-Medium.ttf');
+  src: url('ElMessiri-Medium.ttf') format('embedded-opentype'),
+    url('ElMessiri-Medium.ttf') format('truetype');
+
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'ElMessiri-Regular';
+  src: url('ElMessiri-Regular.ttf');
+  src: url('ElMessiri-Regular.ttf') format('embedded-opentype'),
+    url('ElMessiri-Regular.ttf') format('truetype');
+
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'ElMessiri-SemiBold';
+  src: url('ElMessiri-SemiBold.ttf');
+  src: url('ElMessiri-SemiBold.ttf') format('embedded-opentype'),
+    url('ElMessiri-SemiBold.ttf') format('truetype');
+
+  font-style: normal;
+  font-display: swap;
+}

@@ -1,0 +1,120 @@
+/* 1) Police El Messiri (mets tes fichiers + stylesheet.css dans /public/fonts) */
+@import url("/fonts/stylesheet.css");
+
+/* 2) (Optionnel) CSS de react-draft-wysiwyg
+   Activer SEULEMENT si le paquet est installé : 
+   yarn add react-draft-wysiwyg draft-js
+*/
+@import 'react-draft-wysiwyg/dist/react-draft-wysiwyg.css';
+
+html, body, #root { height: 100%; }
+html { direction: rtl; }
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f3f4f8;
+
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    'ElMessiri-Medium', 'ElMessiri-Bold', 'ElMessiri-Regular',
+    'ElMessiri-SemiBold', sans-serif;
+}
+
+h1 { font-family: ElMessiri-Bold; }
+p  { font-family: ElMessiri-Regular; }
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    'ElMessiri-Medium', 'ElMessiri-Bold', 'ElMessiri-Regular',
+    'ElMessiri-SemiBold', monospace;
+}
+
+/* Direction RTL pour SweetAlert, etc. */
+.swal-direction { direction: rtl; }
+
+/* Désactive le flash bleu sur mobile */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* Zones d’upload/texte + éditeur */
+.add-image { display: flex; align-items: center; justify-content: center; }
+.add-image img { height: auto; object-fit: contain; }
+.core{
+  max-width: '2000px';      /* tu peux monter à 1280/1400 si tu veux */
+  margin: 0 auto;         /* centre la page */
+  padding-inline: 24px;   /* ✅ espace à gauche/droite */
+  padding-block: 16px;    /* haut/bas */
+}
+.container.full {
+  max-width: none;   /* enlève la contrainte */
+  width: 100%;
+}
+
+
+.image-text,
+.two-text {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2rem;
+}
+
+.editor-class {
+  min-height: 20rem;
+  background-color: #fff;
+}
+
+.text1, .text2 { width: 100%; }
+
+/* Responsif */
+@media (max-width: 1024px) {
+  .image-text { flex-wrap: wrap; }
+  .two-text   { justify-content: center; flex-wrap: wrap; gap: 0.5rem; }
+  .add-image  { width: 100%; }
+}
+
+@media (max-width: 768px) {
+  .add-image img {
+    height: auto !important;
+    object-fit: contain;
+    max-width: 100% !important;
+  }
+  .layout .stack-sm { display: flex; flex-direction: column; gap: 12px; }
+  .layout .hide-sm { display: none !important; }
+  .layout .card { padding: 12px; }
+
+}
+/* Conteneur principal de layout */
+.layout {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1200px;        /* limite confortable desktop */
+  margin: 0 auto;
+  padding-inline: clamp(12px, 4vw, 24px);  /* padding fluide */
+  padding-block: clamp(12px, 3vw, 24px);
+}
+
+/* Typo fluide légère */
+.layout h1 { font-size: clamp(1.4rem, 2.5vw, 2rem); }
+.layout h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); }
+.layout p, .layout li, .layout label { font-size: clamp(0.95rem, 1.6vw, 1rem); }
+
+/* Éléments qui débordent souvent */
+.layout img, .layout video { max-width: 100%; height: auto; }
+.layout table { display: block; width: 100%; overflow-x: auto; }
+
+/* Lignes/colonnes adaptatives sans toucher le JSX interne */
+.layout .row { display: flex; flex-wrap: wrap; gap: 16px; }
+.layout .row > * { flex: 1 1 300px; min-width: 240px; }
+
+/* Grilles “magiques” auto-fit si tu as des listes/cards */
+.layout .grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+
