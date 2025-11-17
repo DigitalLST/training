@@ -1,11 +1,10 @@
 // src/App.tsx
 import { Routes, Route } from 'react-router-dom';
 import RequireAuth from './guards/RequireAuth';
-//import ProtectedSection from './components/ProtectedSection';
+import ProtectedSection from './components/ProtectedSection';
 import MainLayout from './layouts/Main';
 import PublicLayout from './layouts/Public';
 import ModeratorLayout from './layouts/Moderator';
-
 import HomeMain from './main/screens/Home';
 import LandingMain from './main/screens/Landing';
 import Parcour from './main/screens/Parcour';
@@ -27,8 +26,13 @@ import ListeCritereModerator from './moderator/screens/ListeCritere';
 import AddCritereModerator from './moderator/screens/AddCritere';
 import UpdateCritereModerator from './moderator/screens/UpdateCritere';
 import NouveauParticipantModerator from './moderator/screens/NouveauParticipant';
-import ListeParticipantsModerator from './main/screens/ValidationDemandeNational';
-
+import ListeParticipantsModerator from './moderator/screens/ValidationDemandeNational';
+import NouveauFormationModerator from './moderator/screens/AcceuilFormation';
+import NouvelleFormationModerator  from './moderator/screens/NouvelleFormation';
+import AddFormationModerator from './moderator/screens/AddFormation';
+import EditFormationModerator from './moderator/screens/UpdateFormation';
+import GestionAffectationModerator from './moderator/screens/GestionAffectation';
+import GestionModerator from './moderator/screens/GestionModerator';
 export default function App() {
   return (
     <Routes>
@@ -71,9 +75,9 @@ export default function App() {
         <Route
           path="/moderator/*"
           element={
-            //<ProtectedSection section="moderator">
+            <ProtectedSection section="moderator_national">
               <ModeratorLayout />
-            //</ProtectedSection>
+            </ProtectedSection>
           }
         >
           <Route index element={<HomeModerator />} />
@@ -90,6 +94,13 @@ export default function App() {
           <Route path="updatecritere" element={<UpdateCritereModerator />} />
           <Route path="gestionparticipants" element={<NouveauParticipantModerator />} />
           <Route path="listeparticipants" element={<ListeParticipantsModerator />} />
+          <Route path="gestionformations" element={<NouveauFormationModerator />} />
+          <Route path="listeformations" element={<NouvelleFormationModerator />} />
+          <Route path="addformation" element={<AddFormationModerator />} />
+          <Route path="updateformation" element={<EditFormationModerator />} />
+          <Route path="participantformation" element={<GestionAffectationModerator />} />
+          <Route path="gestionmoderators" element={<GestionModerator />} />
+
 
         </Route> 
       </Route>  

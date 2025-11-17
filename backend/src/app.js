@@ -10,12 +10,20 @@ const sessionRoutes = require('./routes/session');
 const centreRoutes = require('./routes/centre');
 const critereRoutes = require('./routes/critere');
 const DemandeParticipationRoutes = require('./routes/demande');
+const FormationRoutes= require('./routes/formation');
+const SeedDemandeRoutes=require('./routes/dev.seed.demandes.byIdScout');
+const SeedFormationRoutes=require('./routes/dev.seed.formation');
+const AffectationRoutes=require('../src/routes/affectations');
+const ModeratorRoutes=require('../src/routes/moderators')
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 /*app.listen(PORT, () => console.log('API listening on', PORT));*/
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
+app.use('/api/dev/seed',SeedDemandeRoutes);
+app.use('/api/dev/seed',SeedFormationRoutes);
 app.use('/api/contact',ContactRouter );
 app.use('/api/sessions',sessionRoutes );
 app.use('/api/centres',centreRoutes );
@@ -23,6 +31,9 @@ app.use('/api/auth',AuthRouter );
 app.use('/api/users', usersRoutes);
 app.use('/api/criteres', critereRoutes);
 app.use('/api/demandes', DemandeParticipationRoutes);
+app.use('/api/formations',FormationRoutes);
+app.use('/api/affectations',AffectationRoutes);
+app.use('/api/moderators',ModeratorRoutes);
 app.set('etag', false); 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 

@@ -25,28 +25,44 @@ function buildServiceToken() {
   );
 }
 
+
 async function fetchCertifsByIdKachefa(idKachefa) {
   if (!process.env.ETRAINING_BASE_URL) {
     throw new Error('Missing ETRAINING_BASE_URL env var');
   }
+
   const token = buildServiceToken();
   const url = `${process.env.ETRAINING_BASE_URL}/api/internal/v1/etraining/users/by-idkachefa/${encodeURIComponent(idKachefa)}/certifs`;
 
-  // Si Node >= 18 tu as fetch global ; sinon utilise node-fetch
+  console.log('[e-training] calling URL:', url);
+
   const resp = await fetch(url, { headers: { 'x-access-token': token } });
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`e-training ${resp.status} ${txt}`);
+
+  const ct = resp.headers.get('content-type') || '';
+  const body = await resp.text();
+
+  console.log('[e-training] status:', resp.status);
+  console.log('[e-training] content-type:', ct);
+  console.log('[e-training] body preview:', body.slice(0, 200));
+
+  if (!ct.includes('application/json')) {
+    throw new Error(`e-training non JSON response: ${resp.status}`);
   }
-  const json = await resp.json();
+
+  if (!resp.ok) {
+    throw new Error(`e-training ${resp.status} ${body}`);
+  }
+
+  const json = JSON.parse(body);
   const certifs = Array.isArray(json.certifs) ? json.certifs : [];
-  // Snapshot minimal
+
   return certifs.map(c => ({
     title: c.certificationTitle ?? '',
     code:  c.code ?? '',
     date:  c.date ? new Date(c.date) : null,
   }));
 }
+
 /* ================================================================ */
 
 /* ---------- Création d'une demande ----------

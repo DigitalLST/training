@@ -2,45 +2,70 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user');
 
+const NATIONAL = 'وطني';
+const norm = s => (s ?? '')
+  .normalize('NFC')
+  .replace(/\u200f|\u200e/g, '')
+  .trim();
+
 module.exports = async function requireAuth(req, res, next) {
   try {
-    console.log('[auth] 1 enter');
+    // 1) Récup token (header ou cookie fallback)
     const h = String(req.headers.authorization || '');
-    if (!h.startsWith('Bearer ')) {
-      console.warn('[auth] 2 no bearer');
+    const token = h.startsWith('Bearer ') ? h.slice(7) : (req.cookies?.token || '');
+    if (!token) {
+      console.warn('[auth] no token');
       return res.status(401).json({ error: 'Non authentifié' });
     }
-    const token = h.slice(7);
-    console.log('[auth] 3 got bearer, len=', token.length);
 
+    // 2) Vérif token
     let payload;
     try {
       payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-      console.log('[auth] 4 verified, payload=', payload);
     } catch (e) {
-      console.error('[auth] 4b verify failed:', e.name, e.message);
+      console.error('[auth] jwt.verify failed:', e.name, e.message);
       return res.status(401).json({ error: 'Non authentifié' });
     }
 
-    const uid = payload.id || payload._id || payload.userId;
-    console.log('[auth] 5 uid=', uid);
+    // 3) ID utilisateur depuis le payload (tolérant)
+    const uid = payload.sub || payload.id || payload._id || payload.userId;
     if (!uid) {
-      console.error('[auth] 5b no uid in payload');
+      console.error('[auth] no uid in payload:', payload);
       return res.status(401).json({ error: 'Non authentifié' });
     }
 
-    const user = await User.findById(uid).select('_id email isAdmin isModerator isSuperAdmin').lean();
-    console.log('[auth] 6 userFound=', !!user);
+    // 4) Recharge l'utilisateur en DB (vérité du rôle/région)
+    const user = await User.findById(uid)
+      .select('_id email role region nom prenom idScout')
+      .lean();
+
     if (!user) {
-      console.warn('[auth] 6b user not found in DB for uid=', uid);
+      console.warn('[auth] user not found for uid=', uid);
       return res.status(401).json({ error: 'Non authentifié' });
     }
 
-    req.user = { id: String(user._id), email: user.email, isAdmin: !!user.isAdmin, isModerator: !!user.isModerator, isSuperAdmin: !!user.isSuperAdmin };
-    console.log('[auth] 7 next with user=', req.user);
+    // 5) Expose dans req.user (avec booléens dérivés)
+    const role = user.role;                 // 'user'|'moderator'|'admin'
+    const region = norm(user.region);
+    req.user = {
+      id: String(user._id),
+      email: user.email,
+      role,
+      region,
+      isAdmin: role === 'admin',
+      isModerator: role === 'moderator',
+      isNational: region === NATIONAL,
+      nom: user.nom,
+      prenom: user.prenom,
+      idScout: user.idScout,
+    };
+
+    // Debug light (désactive en prod si besoin)
+    // console.log('[auth] OK user=', req.user);
+
     return next();
   } catch (e) {
-    console.error('[auth] 8 unexpected:', e);
+    console.error('[auth] unexpected:', e);
     return res.status(401).json({ error: 'Non authentifié' });
   }
 };

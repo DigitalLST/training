@@ -2,18 +2,27 @@ type HeaderProps = {
   userName?: string;          // ex: "digital digital - Tunis"
   onLogout?: () => void;      // callback au clic sur "تسجيل الخروج"
 };
+ //const };
 import { NavLink, useLocation,matchPath } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+
 
 const MENU = [
   { label: 'الرئيسية',               to: '/acceuil',   },
   { label: 'إدارة الدورات التدريبية',   to: '/moderator/gestionsessions', activeFor: ['/moderator/gestionsessions','/moderator/sessions','/moderator/addsession','/moderator/session/:id/edit','/moderator/centres','/moderator/addcentre','/moderator/centre/:id/edit','/moderator/gestioncriteres','/moderator/listecriteres','/moderator/addcritere','/moderator/updatecritere']  },
-  { label: 'إدارة المشاركين',    to: '/moderator/gestionparticipants' , activeFor: ['/moderator/gestionparticipants']   },
-  { label: 'إدارة الدراسات التدريبية ',    to: '/moderator/gestionformations', activeFor: ['/moderator/gestionformations']    },
-  { label: 'إدارة المستخدمين',       to: '/moderator/gestionusers', activeFor: ['/moderator/gestionusers']  },
+  { label: 'إدارة المشاركين',    to: '/moderator/gestionparticipants' , activeFor: ['/moderator/gestionparticipants','/moderator/listeparticipants']   },
+  { label: 'إدارة الدراسات التدريبية ',    to: '/moderator/gestionformations', activeFor: ['/moderator/gestionformations','/moderator/listeformations','/moderator/addformation','/moderator/updateformation','/moderator/participantformation']    },
+  { label: 'إدارة المستخدمين',       to: '/moderator/gestionmoderators', activeFor: ['/moderator/gestionmoderators']  },
 ];
 
 
+
 export default function Header({ userName = 'مستخدم', onLogout }: HeaderProps): React.JSX.Element {
+   const navigate = useNavigate();
+  const handleLogout = async () => {
+    await onLogout?.();
+    navigate('/', { replace: true });
+  };
   const { pathname } = useLocation();  
   const at = (pathname.replace(/\/+$/, '') || '/'); // normalize trailing slash
 
@@ -64,7 +73,7 @@ export default function Header({ userName = 'مستخدم', onLogout }: HeaderPr
         <div style={styles.profile}>
           <div style={styles.avatarOutline}/> 
           <div>{userName}</div>
-          <button onClick={onLogout} style={pill(false)}>تسجيل الخروج</button>
+          <button onClick={handleLogout} style={pill(false)}>تسجيل الخروج</button>
 
         </div>
       </div>

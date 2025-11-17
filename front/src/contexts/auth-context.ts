@@ -1,6 +1,6 @@
 // front/src/contexts/auth-context.ts
 import { createContext } from 'react';
-
+export type Role = 'user' | 'moderator' | 'admin';
 export type User = {
   _id: string;
   email: string;
@@ -9,9 +9,7 @@ export type User = {
   idScout: string;
   region: string;
   niveau: string;
-  isAdmin?: boolean | string | number;
-  isModerator?: boolean | string | number;
-  isSuperAdmin?: boolean | string | number;
+  role:Role;
 };
 
 export type AuthState = {

@@ -247,7 +247,7 @@ async function onRegister(e: React.FormEvent) {
                     <option value="مدنين">مدنين</option>
                     <option value="تطاوين">تطاوين</option>
                     <option value="المهجر">المهجر</option>
-                    <option value="قائد وطني">قائد وطني</option>
+                    <option value="وطني">قائد وطني</option>
 
                 </select>
                 </div>

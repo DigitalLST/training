@@ -5,6 +5,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 const RED = '#e20514';
 
+type CertifMini = {
+  title?: string;
+  code?: string;              // ex: "L1", "L2", "L3", ...
+  date?: string | null;       // ISO string côté API
+};
+
 type Demande = {
   _id: string;
   applicantSnapshot: {
@@ -16,6 +22,7 @@ type Demande = {
   branche: string;
   statusRegion: 'PENDING' | 'APPROVED' | 'REJECTED';
   statusNational: 'PENDING' | 'APPROVED' | 'REJECTED';
+  certifsSnapshot?: CertifMini[]; // ⬅️ ajouté
 };
 
 type Selection = { sessionId: string; niveau: string };
@@ -30,6 +37,17 @@ function headers() {
 
 function fmtMonth(iso?: string) {
   return iso ? new Date(iso).toLocaleDateString('ar-TN', { year: 'numeric', month: 'long' }) : '—';
+}
+
+// format date de certif (jj/mm/aaaa en ar-TN)
+function fmtDate(iso?: string | null) {
+  return iso ? new Date(iso).toLocaleDateString('ar-TN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+}
+
+// récupère la date d’une certif par code dans le snapshot
+function certDateByCode(d: Demande, code: string): string {
+  const c = d.certifsSnapshot?.find(x => (x.code || '').toUpperCase() === code.toUpperCase());
+  return fmtDate(c?.date || null);
 }
 
 export default function ListeParticipants(): React.JSX.Element {
@@ -87,6 +105,7 @@ export default function ListeParticipants(): React.JSX.Element {
             branche: d.branche,
             statusRegion: d.statusRegion,
             statusNational: d.statusNational,
+            certifsSnapshot: Array.isArray(d.certifsSnapshot) ? d.certifsSnapshot : [], // ⬅️ mapping snapshot
           }));
         setDemandes(list);
       } catch (e: any) {
@@ -106,6 +125,26 @@ export default function ListeParticipants(): React.JSX.Element {
     () => ['ALL', ...Array.from(new Set(demandes.map(d => d.branche).filter(Boolean)))],
     [demandes]
   );
+
+  // ---- Colonnes snapshot selon le niveau ----
+  const snapshotCols = useMemo(() => {
+    const isPrep = selection.niveau === 'تمهيدية';
+    if (isPrep) {
+      return [
+        { key: 'E1', label: 'الدراسة الابتداية', render: (d: Demande) => '—' },
+        { key: 'L1', label: 'L1',                 render: (d: Demande) => certDateByCode(d, 'L1') },
+        { key: 'S2', label: 'S2',                 render: (_: Demande) => '—' },
+        { key: 'L2', label: 'L2',                 render: (d: Demande) => certDateByCode(d, 'L2') },
+      ];
+    }
+    // défaut = شارة خشبية
+    return [
+      { key: 'E0', label: 'الدراسة التمهيدية', render: (_: Demande) => '—' },
+      { key: 'L1', label: 'L1',               render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'S3', label: 'S3',               render: (_: Demande) => '—' },
+      { key: 'L3', label: 'L3',               render: (d: Demande) => certDateByCode(d, 'L3') },
+    ];
+  }, [selection.niveau]);
 
   // ---- Filtrage + tri ----
   const filteredSorted = useMemo(() => {
@@ -130,8 +169,6 @@ export default function ListeParticipants(): React.JSX.Element {
   function renderNationalCell(d: Demande) {
     const regionName = d.applicantSnapshot.region || '';
     const isNational = regionName === 'قائد وطني';
-
-    // ✅ Cas 1 : si "قائد وطني" → afficher radios directement
     if (isNational) {
       if (d.statusNational === 'PENDING') {
         return (
@@ -157,13 +194,9 @@ export default function ListeParticipants(): React.JSX.Element {
       }
       return <StatusBadge value={d.statusNational} />;
     }
-
-    // ✅ Cas 2 : si région "PENDING"
     if (d.statusRegion === 'PENDING') {
       return <span style={{ color: '#6b7280' }}>في انتظار قرار اللجنة الجهوية</span>;
     }
-
-    // ✅ Cas 3 : décision nationale normale
     if (d.statusNational === 'PENDING') {
       return (
         <>
@@ -277,11 +310,17 @@ export default function ListeParticipants(): React.JSX.Element {
           <thead>
             <tr>
               <th style={styles.thRight}>#</th>
-              <th style={styles.thRight}>رقم الكشاف</th>
-              <th style={styles.thRight}>اللقب</th>
+              <th style={styles.thRight}>المعرف الكشفي</th>
               <th style={styles.thRight}>الإسم</th>
+              <th style={styles.thRight}>اللقب</th>
               <th style={styles.thRight}>الجهة</th>
               <th style={styles.thRight}>القسم</th>
+
+              {/* Colonnes snapshot dynamiques */}
+              {snapshotCols.map(col => (
+                <th key={col.key} style={styles.thRight}>{col.label}</th>
+              ))}
+
               <th style={styles.thRight}>قرار الجهة</th>
               <th style={styles.thRight}>القرار الوطني</th>
             </tr>
@@ -291,16 +330,22 @@ export default function ListeParticipants(): React.JSX.Element {
               <tr key={d._id}>
                 <td style={styles.tdRight}>{idx + 1}</td>
                 <td style={styles.tdRight}>{d.applicantSnapshot.idScout || '—'}</td>
-                <td style={styles.tdRight}>{d.applicantSnapshot.lastName || '—'}</td>
                 <td style={styles.tdRight}>{d.applicantSnapshot.firstName || '—'}</td>
+                <td style={styles.tdRight}>{d.applicantSnapshot.lastName || '—'}</td>
                 <td style={styles.tdRight}>{d.applicantSnapshot.region || '—'}</td>
                 <td style={styles.tdRight}>{d.branche || '—'}</td>
+
+                {/* Valeurs snapshot selon niveau */}
+                {snapshotCols.map(col => (
+                  <td key={col.key} style={styles.tdRight}>{col.render(d)}</td>
+                ))}
+
                 <td style={styles.tdRight}><StatusBadge value={d.statusRegion} /></td>
                 <td style={styles.tdRight}>{renderNationalCell(d)}</td>
               </tr>
             ))}
             {!filteredSorted.length && !loading && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#777' }}>لا توجد مطالب مطابقة.</td></tr>
+              <tr><td colSpan={8 + snapshotCols.length} style={{ textAlign: 'center', color: '#777' }}>لا توجد مطالب مطابقة.</td></tr>
             )}
           </tbody>
         </table>
@@ -315,7 +360,7 @@ export default function ListeParticipants(): React.JSX.Element {
   );
 }
 
-/* ---------- badge ---------- */
+/* ---------- Status badge ---------- */
 function StatusBadge({ value }: { value: string }) {
   const colors: Record<string, string> = {
     APPROVED: '#059669',
@@ -344,7 +389,7 @@ function StatusBadge({ value }: { value: string }) {
 /* ---------- styles ---------- */
 const styles: Record<string, React.CSSProperties> = {
   toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 20 },
-  toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 },
+  toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 } as any,
   circleRedBtn: {
     width: 46, height: 46, borderRadius: 14, background: 'transparent',
     border: `3px solid ${RED}`, color: RED, display: 'grid', placeItems: 'center', cursor: 'pointer',

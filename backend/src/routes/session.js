@@ -132,5 +132,30 @@ router.patch('/:id', async (req, res, next) => {
     next(err);
   }
 });
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1) Valider l'id
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid id format' });
+    }
+
+    // 2) Existe ?
+    const exists = await Session.exists({ _id: id });
+    if (!exists) return res.sendStatus(404);
+
+    // 4) Supprimer la session
+    const rSession = await Session.deleteOne({ _id: id });
+
+    // 5) Réponse (ou res.sendStatus(204) si tu préfères)
+    return res.status(200).json({
+      deleted: rSession.deletedCount === 1
+    });
+  } catch (e) {
+    console.error('DELETE /sessions cascade error:', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
 
 module.exports = router;

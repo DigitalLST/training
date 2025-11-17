@@ -5,7 +5,7 @@ const CARDS = [
   { label: 'إدارة الدورات التدريبية',   to: '/moderator/gestionsessions'  },
   { label: 'إدارة المشاركين',    to: '/moderator/gestionparticipants'   },
   { label: 'إدارة الدراسات التدريبية ',    to: '/moderator/gestionformations'   },
-  { label: 'إدارة المستخدمين',       to: '/moderator/gestionusers' },
+  { label: 'إدارة المستخدمين',       to: '/moderator/gestionmoderators' },
 ];
 
 export default function Home(): React.JSX.Element {

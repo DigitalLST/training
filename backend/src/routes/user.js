@@ -3,7 +3,6 @@ const { body, validationResult, query, param } = require('express-validator');
 const User = require('../models/user');
 const requireAuth = require('../middlewares/auth');
 const mongoose = require('mongoose'); 
-
 const router = express.Router();
 
 
