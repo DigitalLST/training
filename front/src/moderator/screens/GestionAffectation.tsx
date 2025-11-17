@@ -143,14 +143,11 @@ export default function GestionAffectation(): React.ReactElement | null {
   if (!ctx?.fid) return null; // le temps du redirect éventuel
 
   // -------- état data & UI --------
-  const { sid, fid } = ctx;
+  const { fid } = ctx;
   const [sessionTitle, setSessionTitle] = React.useState(ctx.title ?? '');
-  const [sessionType, setSessionType]   = React.useState(ctx.type ?? '');
-  const [period, setPeriod]             = React.useState(ctx.period ?? '');
+
 
   React.useEffect(() => { setSessionTitle(ctx.title ?? ''); }, [ctx.title]);
-  React.useEffect(() => { setSessionType(ctx.type ?? ''); }, [ctx.type]);
-  React.useEffect(() => { setPeriod(ctx.period ?? ''); }, [ctx.period]);
 
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving]   = React.useState(false);

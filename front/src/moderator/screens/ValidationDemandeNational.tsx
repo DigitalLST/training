@@ -131,7 +131,7 @@ export default function ListeParticipants(): React.JSX.Element {
     const isPrep = selection.niveau === 'تمهيدية';
     if (isPrep) {
       return [
-        { key: 'E1', label: 'الدراسة الابتداية', render: (d: Demande) => '—' },
+       // { key: 'E1', label: 'الدراسة الابتداية', render: (d: Demande) => '—' },
         { key: 'L1', label: 'L1',                 render: (d: Demande) => certDateByCode(d, 'L1') },
         { key: 'S2', label: 'S2',                 render: (_: Demande) => '—' },
         { key: 'L2', label: 'L2',                 render: (d: Demande) => certDateByCode(d, 'L2') },
