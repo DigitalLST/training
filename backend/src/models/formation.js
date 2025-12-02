@@ -65,9 +65,5 @@ FormationSchema.index(
   { unique: true, name: 'uniq_formation_per_session_niveau_centre_nom_branches' }
 );
 
-// Index utiles pour requêtes fréquentes
-FormationSchema.index({ session: 1, niveau: 1 });
-FormationSchema.index({ centre: 1 });
-FormationSchema.index({ updatedAt: -1 });
 
 module.exports = mongoose.model('Formation', FormationSchema);

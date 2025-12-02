@@ -3,11 +3,11 @@ const express = require('express');
 const { param, query, validationResult } = require('express-validator');
 const requireAuth = require('../middlewares/auth');
 
-const FormationAffectation = require('../models/affectation'); // ← modèle ci-dessus
+const FormationAffectation = require('../models/affectation');
 const User       = require('../models/user');
 const Demande    = require('../models/demande');
 const Formation  = require('../models/formation');
-
+const Evaluation  = require('../models/evaluation');
 const router = express.Router();
 
 function bad(req, res) {
@@ -23,32 +23,138 @@ function rxFromQ(q) {
 const norm = v => (v ?? '').toString().trim();
 
 /** GET /affectations/formations/:formationId/affectations
- * -> [{ user:{_id,prenom,nom,email,idScout}, role }]
+ * -> [{ _id, role, isPresent, user:{_id,prenom,nom,email,idScout,region,certifsSnapshot} }]
  */
 router.get(
   '/formations/:formationId/affectations',
   requireAuth,
   [param('formationId').isMongoId()],
   async (req, res) => {
-    const e = bad(req, res); if (e) return;
+    const e = bad(req, res);
+    if (e) return;
+
     const { formationId } = req.params;
 
-    const rows = await FormationAffectation.find({ formation: formationId })
-      .select('_id user role')
-      .populate({ path: 'user', select: '_id prenom nom email idScout' })
-      .lean();
+    try {
+      /* ---------- 1) Formation & session ---------- */
+      const formation = await Formation.findById(formationId)
+        .select('_id nom session')
+        .lean();
 
-    res.json(rows.map(r => ({
-      _id: String(r._id),
-      role: r.role,
-      user: r.user ? {
-        _id: String(r.user._id),
-        prenom: r.user.prenom,
-        nom: r.user.nom,
-        email: r.user.email,
-        idScout: r.user.idScout
-      } : null
-    })));
+      if (!formation) {
+        return res.status(404).json({ error: 'Formation introuvable' });
+      }
+
+      const sessionId = formation.session;
+
+      /* ---------- 2) Affectations (TOUS LES RÔLES) + user ---------- */
+      const rows = await FormationAffectation.find({
+        formation: formationId,
+      })
+        .select('_id user role isPresent')
+        .populate({
+          path: 'user',
+          select: '_id prenom nom email idScout region',
+        })
+        .lean();
+
+      const traineeUserIds = rows
+        .filter(r => r.role === 'trainee' && r.user)
+        .map(r => r.user._id)
+        .filter(Boolean);
+
+      // S’il n’y a pas de trainees, on renvoie quand même toutes les affectations
+      if (traineeUserIds.length === 0) {
+        return res.json(
+          rows.map(r => ({
+            _id: String(r._id),
+            role: r.role,
+            isPresent: !!r.isPresent,
+            user: r.user
+              ? {
+                  _id: String(r.user._id),
+                  prenom: r.user.prenom,
+                  nom: r.user.nom,
+                  email: r.user.email,
+                  idScout: r.user.idScout,
+                  region: r.user.region || null,
+                  certifsSnapshot: [],
+                }
+              : null,
+          }))
+        );
+      }
+
+      /* ---------- 3) Demandes (applicant, session) pour les trainees ---------- */
+      let demandes = [];
+      if (sessionId) {
+        demandes = await Demande.find({
+          applicant: { $in: traineeUserIds },
+          session: sessionId,
+        })
+          .select('applicant certifsSnapshot')
+          .lean();
+      }
+
+      /* ---------- 4) Map applicant -> certifsSnapshot ---------- */
+      const snapshotByUser = new Map();
+
+      for (const d of demandes) {
+        const uid = String(d.applicant);
+
+        let snaps = [];
+        if (Array.isArray(d.certifsSnapshot)) {
+          snaps = d.certifsSnapshot.map(c => ({
+            code: c.code,
+            date: c.date || c.doneAt || c.completedAt || null,
+            label: c.label || undefined,
+          }));
+        }
+
+        const existing = snapshotByUser.get(uid) || [];
+        snapshotByUser.set(uid, [...existing, ...snaps]);
+      }
+
+      /* ---------- 5) Payload finale ---------- */
+      const payload = rows.map(r => {
+        if (!r.user) {
+          return {
+            _id: String(r._id),
+            role: r.role,
+            isPresent: !!r.isPresent,
+            user: null,
+          };
+        }
+
+        const uid = String(r.user._id);
+        // snapshots seulement pour les trainees ; vide pour les autres rôles
+        const certifsSnapshot =
+          r.role === 'trainee' ? (snapshotByUser.get(uid) || []) : [];
+
+        return {
+          _id: String(r._id),
+          role: r.role,
+          isPresent: !!r.isPresent,
+          user: {
+            _id: uid,
+            prenom: r.user.prenom,
+            nom: r.user.nom,
+            email: r.user.email,
+            idScout: r.user.idScout,
+            region: r.user.region || null,
+            certifsSnapshot,
+          },
+        };
+      });
+
+      return res.json(payload);
+    } catch (err) {
+      console.error(
+        'GET /affectations/formations/:formationId/affectations ERROR',
+        err
+      );
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
   }
 );
 
@@ -56,12 +162,6 @@ router.get(
  * Query:
  *  - role=trainer|director|trainee (obligatoire)
  *  - q=... (facultatif)
- *
- * Règles:
- *  - trainer/director: Users avec niveau ∈ { 'قائد تدريب','مساعد قائد تدريب' } (trim)
- *  - trainee: Demande.APPROVED sur la SESSION de la formation,
- *             avec trainingLevel == formation.niveau et branche ∈ formation.branches
- *  - Exclut déjà affectés à cette formation
  */
 router.get(
   '/formations/:formationId/candidates',
@@ -78,7 +178,6 @@ router.get(
     const { role, q } = req.query;
     const re = rxFromQ(q);
 
-    // Charger la formation (pour session/niveau/branches)
     const f = await Formation.findById(formationId)
       .select('session niveau branches')
       .lean();
@@ -88,7 +187,6 @@ router.get(
     const formLevel = norm(f.niveau);
     const formBranches = (Array.isArray(f.branches) ? f.branches : []).map(norm).filter(Boolean);
 
-    // Exclure déjà affectés à CETTE formation
     const already = await FormationAffectation.find({ formation: formationId }).select('user').lean();
     const excludeIds = new Set(already.map(a => String(a.user)));
 
@@ -115,11 +213,10 @@ router.get(
         .filter(u => !excludeIds.has(String(u._id)))
         .map(u => ({ _id: String(u._id), prenom: u.prenom, nom: u.nom, email: u.email, idScout: u.idScout }));
 
-      return res.json(out.slice(0, 25));
+      return res.json(out);
     }
 
     /* ===== TRAINEE ===== */
-    // Demandes de la session de la formation, APPROVED
     const demandes = await Demande.find({
       session: sessionId,
       statusNational: 'APPROVED',
@@ -155,17 +252,11 @@ router.get(
       }, {})
     );
 
-    return res.json(uniq.slice(0, 25));
+    return res.json(uniq);
   }
 );
 
-/** POST /affectations/formations/:formationId/affectations/diff
- * Body: { upserts:[{ userId, role }], deletes:[userId,...] }
- * - trainer/director: User.niveau ∈ {قائد تدريب, مساعد قائد تدريب}
- * - trainee: Demande.APPROVED dans la *session* de la formation
- *            ET trainingLevel == formation.niveau
- *            ET branche ∈ formation.branches
- */
+/** POST /affectations/formations/:formationId/affectations/diff */
 router.post(
   '/formations/:formationId/affectations/diff',
   requireAuth,
@@ -176,7 +267,6 @@ router.post(
     const { formationId } = req.params;
     const { upserts = [], deletes = [] } = req.body || {};
 
-    // Charger formation (pour validations)
     const f = await Formation.findById(formationId).select('session niveau branches').lean();
     if (!f) return res.status(404).json({ error: 'Formation introuvable' });
 
@@ -184,12 +274,10 @@ router.post(
     const formLevel   = norm(f.niveau);
     const formBranches= (Array.isArray(f.branches) ? f.branches : []).map(norm).filter(Boolean);
 
-    // deletes
     if (Array.isArray(deletes) && deletes.length) {
       await FormationAffectation.deleteMany({ formation: formationId, user: { $in: deletes } });
     }
 
-    // validations + upserts
     for (const it of upserts) {
       const userId = it?.userId;
       const role   = it?.role;
@@ -222,7 +310,6 @@ router.post(
       }
     }
 
-    // upserts (unique par (formation,user))
     if (Array.isArray(upserts) && upserts.length) {
       const ops = upserts.map(({ userId, role }) => ({
         updateOne: {
@@ -237,5 +324,170 @@ router.post(
     res.json({ ok: true });
   }
 );
+
+/** GET /affectations/mine-formations */
+router.get(
+  '/mine-formations',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      const rows = await FormationAffectation.find({
+        user: userId,
+        role: { $in: ['trainer', 'director'] },
+      })
+        .select('formation role')
+        .populate({
+          path: 'formation',
+          select: 'nom centre centreTitleSnapshot centreRegionSnapshot session startDate endDate',
+          populate: {
+            path: 'session',
+            select: 'title startDate endDate',
+          },
+        })
+        .lean();
+
+      const byFormation = new Map();
+
+      for (const row of rows) {
+        const f = row.formation;
+        if (!f) continue;
+
+        const fid = String(f._id);
+        const current = byFormation.get(fid);
+
+        const r = row.role === 'director' ? 'director' : 'trainer';
+        if (current && current.myRole === 'director') {
+          continue;
+        }
+
+        const session = f.session || {};
+
+        let sessionId = undefined;
+        if (session && session._id) {
+          sessionId = String(session._id);
+        } else if (f.session) {
+          sessionId = String(f.session);
+        }
+
+        byFormation.set(fid, {
+          formationId: fid,
+          nom: f.nom || '',
+          myRole: r,
+          sessionTitle: session.title || '',
+          startDate: (session.startDate || f.startDate) || null,
+          endDate:   (session.endDate   || f.endDate)   || null,
+          centreTitle: f.centreTitleSnapshot || '',
+          centreRegion: f.centreRegionSnapshot || '',
+          sessionId,
+        });
+      }
+
+      return res.json(Array.from(byFormation.values()));
+    } catch (e) {
+      console.error('GET /affectations/mine-formations', e);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+);
+
+/** POST /affectations/trainee-presence
+ * Body: { items: [ { affectationId, isPresent }, ... ] }
+ */
+router.post(
+  '/trainee-presence',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const { items } = req.body || {};
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'items array is required' });
+      }
+
+      const ops = [];
+
+      for (const it of items) {
+        if (!it || !it.affectationId) continue;
+
+        const isPresent = !!it.isPresent;
+
+        ops.push({
+          updateOne: {
+            filter: {
+              _id: it.affectationId,
+              role: 'trainee',
+            },
+            update: {
+              $set: { isPresent },
+            },
+          },
+        });
+      }
+
+      if (ops.length === 0) {
+        return res.status(400).json({ error: 'No valid items to update' });
+      }
+
+      const result = await FormationAffectation.bulkWrite(ops);
+      const updated =
+        (result.modifiedCount || 0) +
+        (result.upsertedCount || 0) +
+        (result.matchedCount || 0);
+
+      /* ---- Initialiser Evaluation pour les stagiaires marqués présents ---- */
+      const presentIds = items
+        .filter(it => it && it.affectationId && it.isPresent)
+        .map(it => it.affectationId);
+
+      if (presentIds.length) {
+        const affRows = await FormationAffectation.find({
+          _id: { $in: presentIds },
+          role: 'trainee',
+        })
+          .select('_id formation user')
+          .populate({
+            path: 'formation',
+            select: '_id session',
+          })
+          .lean();
+
+        const evalOps = [];
+
+        for (const row of affRows) {
+          if (!row.formation || !row.formation.session) continue;
+
+          evalOps.push({
+            updateOne: {
+              filter: {
+                formation: row.formation._id,
+                session: row.formation.session,
+                trainee: row.user,
+              },
+              update: {
+                $setOnInsert: {
+                  affectation: row._id,
+                  status: 'draft',
+                  items: [],
+                },
+              },
+              upsert: true,
+            },
+          });
+        }
+
+        if (evalOps.length) {
+          await Evaluation.bulkWrite(evalOps);
+        }
+      }
+
+      return res.json({ ok: true, updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 
 module.exports = router;

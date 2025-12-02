@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      font-family: "Amiri", serif;
+      direction: rtl;
+      text-align: right;
+      margin: 20px;
+    }
+
+    .header-logo {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .header-logo img {
+      width: 120px;
+    }
+
+    .title {
+      text-align: center;
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+      margin-bottom: 2px;
+    }
+
+    .sub_subtitle {
+      text-align: center;
+      font-size: 18px;
+      margin-bottom: 2px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    th, td {
+      border: 1px solid #999;
+      padding: 4px 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    th {
+      background-color: #f1f1f1;
+      font-weight: bold;
+    }
+
+    .signatures-table td {
+      border: none;
+      text-align: center;
+      padding: 10px;
+    }
+
+    .signatures-table img {
+      width: 100px;
+      margin-top: 4px;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    .validation {
+      margin-top: 10px;
+      color: #e20514;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- EN-TÊTE AVEC LOGO -->
+  <div class="header-logo">
+    <% if (logoDataUrl) { %>
+      <img src="<%= logoDataUrl %>" />
+    <% } %>
+  </div>
+
+  <div class="title"><%= sessionTitle %></div>
+  <div class="subtitle"><%= formationTitle %></div>
+
+  <% if (centreLine) { %>
+    <div class="subtitle"><%= centreLine %></div>
+  <% } %>
+
+  <% if (periodLine) { %>
+    <div class="sub_subtitle"><%= periodLine %></div>
+  <% } %>
+
+  <% if (directorName) { %>
+    <div class="subtitle">قائد الدراسة : <%= directorName %></div>
+  <% } %>
+
+  <!-- TABLEAU GLOBAL DES RÉSULTATS -->
+  <div class="section-title">النتائج النهائية</div>
+  <table>
+    <thead>
+      <tr>
+        <th>المعرف الكشفي</th>
+        <th>الاسم واللقب</th>
+        <th>الجهة</th>
+        <th>البريد الالكتروني</th>
+        <th>العدد الممنوح</th>
+        <th>النسبة</th>
+        <th>القرار</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% (trainees || []).forEach(function(t) { %>
+        <tr>
+          <td><%= t.idScout || '—' %></td>
+          <td><%= t.prenom || '' %> <%= t.nom || '' %></td>
+          <td><%= t.region || '—' %></td>
+          <td><%= t.email || '—' %></td>
+          <td><%= t.totalMax %>/<%= t.totalNote %></td>
+          <td><%= t.pct.toFixed(1) %>%</td>
+          <td><%= t.decisionLabel %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <!-- STATS GLOBALES -->
+  <div class="section-title">إحصائيات عامة</div>
+  <table>
+    <thead>
+      <tr>
+        <th>عدد المشاركين</th>
+        <th>عدد الحاضرين</th>
+        <th>عدد المجازين</th>
+        <th>عدد المعيدين</th>
+        <th>عدد غير المؤهلين</th>
+        <th>نسبة النجاح</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><%= stats.totalParticipants || 0 %></td>
+        <td><%= stats.totalPresent || 0 %></td>
+        <td><%= stats.successCount || 0 %></td>
+        <td><%= stats.retakeCount || 0 %></td>
+        <td><%= stats.incompatibleCount || 0 %></td>
+        <td><%= (stats.successPct || 0).toFixed(1) %>%</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <% if (validationSentence) { %>
+    <div class="validation"><%= validationSentence %></div>
+  <% } %>
+
+  <!-- ÉQUIPE DE DIRECTION + SIGNATURES (PAGE RÉCAP) -->
+  <div class="section-title">قيادة الدراسة</div>
+  <table class="signatures-table">
+    <tbody>
+      <% (team || []).forEach(function(m) { %>
+        <tr>
+          <td>
+            <div><strong><%= m.roleLabel %></strong></div>
+            <div><%= m.prenom || '' %> <%= m.nom || '' %></div>
+          </td>
+          <td>
+            <% if (m.lastApprovedAtText) { %>
+              <div>تاريخ المصادقة : <%= m.lastApprovedAtText %></div>
+            <% } %>
+          </td>
+          <td>
+            <% if (m.signatureDataUrl) { %>
+              <div><img src="<%= m.signatureDataUrl %>" /></div>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+  <!-- PAGES INDIVIDUELLES PAR STAGIAIRE -->
+  <% (trainees || []).forEach(function(t, idx) { %>
+    <div class="page-break"></div>
+
+    <div class="section-title">
+      بطاقة تقييم المتدرب
+    </div>
+
+    <div class="sub_subtitle">
+      <div>المعرف الكشفي : <%= t.idScout || '—' %></div>
+      <div>الاسم و اللقب : <%= t.prenom || '' %> <%= t.nom || '' %></div>
+      <div>الجهة : <%= t.region || '—' %></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>مجال التقييم</th>
+          <th>عنصر التقييم</th>
+          <th>العلامة القصوى</th>
+          <th>العلامة</th>
+        </tr>
+      </thead>
+
+      <% if (t.evaluationGroups && t.evaluationGroups.length) { %>
+        <!-- Version avec fusion des cellules famille -->
+        <tbody>
+          <% (t.evaluationGroups || []).forEach(function(g) { %>
+            <% (g.rows || []).forEach(function(r, idxRow) { %>
+              <tr>
+                <% if (idxRow === 0) { %>
+                  <td rowspan="<%= g.rows.length %>"><%= g.famille || '' %></td>
+                <% } %>
+                <td><%= r.critere || '' %></td>
+                <td><%= r.maxnote || '' %></td>
+                <td><%= r.note || '' %></td>
+              </tr>
+            <% }) %>
+          <% }) %>
+        </tbody>
+      <% } else { %>
+        <!-- Fallback : ancienne version ligne à ligne -->
+        <tbody>
+          <% (t.evaluationRows || []).forEach(function(r) { %>
+            <tr>
+              <td><%= r.famille || '' %></td>
+              <td><%= r.critere || '' %></td>
+              <td><%= r.maxnote || '' %></td>
+              <td><%= r.note || '' %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      <% } %>
+    </table>
+
+    <div class="subtitle" style="margin-top: 8px;">
+      المجموع : <%= t.totalNote %>/<%= t.totalMax %>
+      ( <%= t.pct.toFixed(1) %>% ) – القرار : <%= t.decisionLabel %>
+    </div>
+
+    <!-- ÉQUIPE DE DIRECTION + SIGNATURES (RAPPEL SUR CHAQUE PAGE) -->
+    <div class="section-title">قيادة الدراسة</div>
+    <table class="signatures-table">
+      <tbody>
+        <% (team || []).forEach(function(m) { %>
+          <tr>
+            <td>
+              <div><strong><%= m.roleLabel %></strong></div>
+              <div><%= m.prenom || '' %> <%= m.nom || '' %></div>
+            </td>
+            <td>
+              <% if (m.lastApprovedAtText) { %>
+                <div>تاريخ المصادقة : <%= m.lastApprovedAtText %></div>
+              <% } %>
+            </td>
+            <td>
+              <% if (m.signatureDataUrl) { %>
+                <div><img src="<%= m.signatureDataUrl %>" /></div>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+
+  <% }) %> <!-- fin boucle trainees -->
+
+</body>
+</html>

@@ -22,7 +22,7 @@ type Demande = {
   branche: string;
   statusRegion: 'PENDING' | 'APPROVED' | 'REJECTED';
   statusNational: 'PENDING' | 'APPROVED' | 'REJECTED';
-  certifsSnapshot?: CertifMini[]; // ⬅️ ajouté
+  certifsSnapshot?: CertifMini[];
 };
 
 type Selection = { sessionId: string; niveau: string };
@@ -36,17 +36,27 @@ function headers() {
 }
 
 function fmtMonth(iso?: string) {
-  return iso ? new Date(iso).toLocaleDateString('ar-TN', { year: 'numeric', month: 'long' }) : '—';
+  return iso
+    ? new Date(iso).toLocaleDateString('ar-TN', { year: 'numeric', month: 'long' })
+    : '—';
 }
 
 // format date de certif (jj/mm/aaaa en ar-TN)
 function fmtDate(iso?: string | null) {
-  return iso ? new Date(iso).toLocaleDateString('ar-TN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+  return iso
+    ? new Date(iso).toLocaleDateString('ar-TN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      })
+    : '—';
 }
 
 // récupère la date d’une certif par code dans le snapshot
 function certDateByCode(d: Demande, code: string): string {
-  const c = d.certifsSnapshot?.find(x => (x.code || '').toUpperCase() === code.toUpperCase());
+  const c = d.certifsSnapshot?.find(
+    x => (x.code || '').toUpperCase() === code.toUpperCase()
+  );
   return fmtDate(c?.date || null);
 }
 
@@ -67,62 +77,125 @@ export default function ListeParticipants(): React.JSX.Element {
 
   const [sessionMeta, setSessionMeta] = useState<SessionMeta | null>(null);
   const [demandes, setDemandes] = useState<Demande[]>([]);
+  const [total, setTotal] = useState(0);
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   const [selectedRegion, setSelectedRegion] = useState('ALL');
   const [selectedBranche, setSelectedBranche] = useState('ALL');
-  const [decisions, setDecisions] = useState<Record<string, 'APPROVED' | 'REJECTED'>>({});
+  const [decisions, setDecisions] = useState<
+    Record<string, 'APPROVED' | 'REJECTED'>
+  >({});
+
+  // pagination
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+  const skip = (page - 1) * pageSize;
+  const maxPage = Math.max(1, Math.ceil((total || 0) / pageSize));
+
+  const [syncing, setSyncing] = useState(false);
 
   // ---- Fetch session meta ----
   useEffect(() => {
     (async () => {
       if (!selection.sessionId) return;
       try {
-        const r = await fetch(`${API_BASE}/sessions/${selection.sessionId}?ts=${Date.now()}`, {
-          headers: headers(), cache: 'no-store',
-        });
+        const r = await fetch(
+          `${API_BASE}/sessions/${selection.sessionId}?ts=${Date.now()}`,
+          {
+            headers: headers(),
+            cache: 'no-store',
+          }
+        );
         if (!r.ok) return;
         const j = await r.json();
         setSessionMeta({ title: j?.title, startDate: j?.startDate });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })();
   }, [selection.sessionId]);
 
-  // ---- Fetch demandes ----
+  // ---- Fetch demandes (page courante) ----
   useEffect(() => {
     (async () => {
+      if (!selection.sessionId || !selection.niveau) return;
       try {
-        setLoading(true); setErr(null);
-        const url = `${API_BASE}/demandes?sessionId=${selection.sessionId}&trainingLevel=${selection.niveau}`;
-        const res = await fetch(url, { headers: headers(), cache: 'no-store' });
+        setLoading(true);
+        setErr(null);
+
+        const params = new URLSearchParams();
+        params.set('sessionId', selection.sessionId);
+        params.set('trainingLevel', selection.niveau);
+        params.set('skip', String(skip));
+        params.set('limit', String(pageSize));
+
+        const res = await fetch(
+          `${API_BASE}/demandes?${params.toString()}`,
+          { headers: headers(), cache: 'no-store' }
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
         const data = await res.json();
-        const list: Demande[] = (Array.isArray(data) ? data : data.demandes || [])
-          .map((d: any) => ({
-            _id: d._id,
-            applicantSnapshot: d.applicantSnapshot || {},
-            branche: d.branche,
-            statusRegion: d.statusRegion,
-            statusNational: d.statusNational,
-            certifsSnapshot: Array.isArray(d.certifsSnapshot) ? d.certifsSnapshot : [], // ⬅️ mapping snapshot
-          }));
+
+        // supporte deux formats :
+        // - nouveau: { items: [...], total, skip, limit }
+        // - ancien:  [ ... ]
+        const rawList: any[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data.items)
+          ? data.items
+          : [];
+        const totalCount =
+          typeof data.total === 'number' ? data.total : rawList.length;
+
+        const list: Demande[] = rawList.map((d: any) => ({
+          _id: d._id,
+          applicantSnapshot: d.applicantSnapshot || {},
+          branche: d.branche,
+          statusRegion: d.statusRegion,
+          statusNational: d.statusNational,
+          certifsSnapshot: Array.isArray(d.certifsSnapshot)
+            ? d.certifsSnapshot
+            : [],
+        }));
+
         setDemandes(list);
+        setTotal(totalCount);
+
+        // si on est sur une page > maxPage après filtre total, on redescend
+        const newMax = Math.max(1, Math.ceil(totalCount / pageSize));
+        if (page > newMax) {
+          setPage(newMax);
+        }
       } catch (e: any) {
         setErr(e.message || 'تعذّر الجلب');
       } finally {
         setLoading(false);
       }
     })();
-  }, [selection.sessionId, selection.niveau]);
+  }, [selection.sessionId, selection.niveau, skip, page, pageSize]);
 
-  // ---- Filtres ----
+  // ---- Filtres (sur la page courante) ----
   const regions = useMemo(
-    () => ['ALL', ...Array.from(new Set(demandes.map(d => d.applicantSnapshot?.region || '').filter(Boolean)))],
+    () => [
+      'ALL',
+      ...Array.from(
+        new Set(
+          demandes
+            .map(d => d.applicantSnapshot?.region || '')
+            .filter(Boolean)
+        )
+      ),
+    ],
     [demandes]
   );
   const branches = useMemo(
-    () => ['ALL', ...Array.from(new Set(demandes.map(d => d.branche).filter(Boolean)))],
+    () => [
+      'ALL',
+      ...Array.from(new Set(demandes.map(d => d.branche).filter(Boolean))),
+    ],
     [demandes]
   );
 
@@ -131,33 +204,37 @@ export default function ListeParticipants(): React.JSX.Element {
     const isPrep = selection.niveau === 'تمهيدية';
     if (isPrep) {
       return [
-       // { key: 'E1', label: 'الدراسة الابتداية', render: (d: Demande) => '—' },
-        { key: 'L1', label: 'L1',                 render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'S2', label: 'S2',                 render: (_: Demande) => '—' },
-        { key: 'L2', label: 'L2',                 render: (d: Demande) => certDateByCode(d, 'L2') },
+        { key: 'E1', label: 'الدراسة الابتداية', render: (_d: Demande) => '—' },
+        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+        { key: 'S2', label: 'S2', render: (_: Demande) => '—' },
+        { key: 'L2', label: 'L2', render: (d: Demande) => certDateByCode(d, 'L2') },
       ];
     }
     // défaut = شارة خشبية
     return [
       { key: 'E0', label: 'الدراسة التمهيدية', render: (_: Demande) => '—' },
-      { key: 'L1', label: 'L1',               render: (d: Demande) => certDateByCode(d, 'L1') },
-      { key: 'S3', label: 'S3',               render: (_: Demande) => '—' },
-      { key: 'L3', label: 'L3',               render: (d: Demande) => certDateByCode(d, 'L3') },
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'S3', label: 'S3', render: (_: Demande) => '—' },
+      { key: 'L3', label: 'L3', render: (d: Demande) => certDateByCode(d, 'L3') },
     ];
   }, [selection.niveau]);
 
-  // ---- Filtrage + tri ----
+  // ---- Filtrage + tri (sur la page courante) ----
   const filteredSorted = useMemo(() => {
     const arr = demandes.filter(
       d =>
         d.statusRegion !== 'REJECTED' &&
-        (selectedRegion === 'ALL' || d.applicantSnapshot?.region === selectedRegion) &&
+        (selectedRegion === 'ALL' ||
+          d.applicantSnapshot?.region === selectedRegion) &&
         (selectedBranche === 'ALL' || d.branche === selectedBranche)
     );
     return arr.sort((a, b) => {
-      const ra = (a.applicantSnapshot.region || '').localeCompare(b.applicantSnapshot.region || 'ar');
+      const ra = (a.applicantSnapshot.region || '').localeCompare(
+        b.applicantSnapshot.region || '',
+        'ar'
+      );
       if (ra !== 0) return ra;
-      return (a.branche || '').localeCompare(b.branche || 'ar');
+      return (a.branche || '').localeCompare(b.branche || '', 'ar');
     });
   }, [demandes, selectedRegion, selectedBranche]);
 
@@ -165,10 +242,89 @@ export default function ListeParticipants(): React.JSX.Element {
     setDecisions(prev => ({ ...prev, [id]: value }));
   }
 
+  // ---- Resync certifs pour la page courante ----
+  async function onResyncCertifs() {
+    if (!selection.sessionId) return;
+    try {
+      setSyncing(true);
+      setErr(null);
+
+      const payload = {
+        sessionId: selection.sessionId,
+        trainingLevel: selection.niveau, // si tu filtres côté back
+        skip,
+        limit: pageSize,
+      };
+
+      const r = await fetch(`${API_BASE}/demandes/resync-page`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify(payload),
+      });
+
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        throw new Error(txt || `HTTP ${r.status}`);
+      }
+
+      const j = await r.json();
+      if (j.rateLimited) {
+        alert(
+          `تمّ تحديث شهادات ${j.processed || 0} مشارك في هذه الصفحة، ثمّ توقّف النظام بسبب حدود e-training. الرجاء إعادة المحاولة لاحقاً للبقيّة.`
+        );
+      } else {
+        alert(
+          `تمّ تحديث شهادات ${j.processed || 0} مشارك في هذه الصفحة.`
+        );
+      }
+
+      // recharger la page courante pour voir les snapshots à jour
+      const params = new URLSearchParams();
+      params.set('sessionId', selection.sessionId);
+      params.set('trainingLevel', selection.niveau);
+      params.set('skip', String(skip));
+      params.set('limit', String(pageSize));
+
+      const r2 = await fetch(
+        `${API_BASE}/demandes?${params.toString()}`,
+        { headers: headers(), cache: 'no-store' }
+      );
+      if (r2.ok) {
+        const data2 = await r2.json();
+        const rawList: any[] = Array.isArray(data2)
+          ? data2
+          : Array.isArray(data2.items)
+          ? data2.items
+          : [];
+        const totalCount =
+          typeof data2.total === 'number' ? data2.total : rawList.length;
+
+        const list: Demande[] = rawList.map((d: any) => ({
+          _id: d._id,
+          applicantSnapshot: d.applicantSnapshot || {},
+          branche: d.branche,
+          statusRegion: d.statusRegion,
+          statusNational: d.statusNational,
+          certifsSnapshot: Array.isArray(d.certifsSnapshot)
+            ? d.certifsSnapshot
+            : [],
+        }));
+
+        setDemandes(list);
+        setTotal(totalCount);
+      }
+    } catch (e: any) {
+      alert(e.message || 'تعذّر تحديث معطيات التدريب عن بعد لهذه الصفحة');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // ---- Affichage décision nationale ----
   function renderNationalCell(d: Demande) {
     const regionName = d.applicantSnapshot.region || '';
     const isNational = regionName === 'قائد وطني';
+
     if (isNational) {
       if (d.statusNational === 'PENDING') {
         return (
@@ -179,7 +335,8 @@ export default function ListeParticipants(): React.JSX.Element {
                 name={`nat-${d._id}`}
                 checked={decisions[d._id] === 'APPROVED'}
                 onChange={() => setDecision(d._id, 'APPROVED')}
-              />{' '}قبول
+              />{' '}
+              قبول
             </label>
             <label style={{ marginInlineStart: 12 }}>
               <input
@@ -187,16 +344,21 @@ export default function ListeParticipants(): React.JSX.Element {
                 name={`nat-${d._id}`}
                 checked={decisions[d._id] === 'REJECTED'}
                 onChange={() => setDecision(d._id, 'REJECTED')}
-              />{' '}رفض
+              />{' '}
+              رفض
             </label>
           </>
         );
       }
       return <StatusBadge value={d.statusNational} />;
     }
+
     if (d.statusRegion === 'PENDING') {
-      return <span style={{ color: '#6b7280' }}>في انتظار قرار اللجنة الجهوية</span>;
+      return (
+        <span style={{ color: '#6b7280' }}>في انتظار قرار اللجنة الجهوية</span>
+      );
     }
+
     if (d.statusNational === 'PENDING') {
       return (
         <>
@@ -206,7 +368,8 @@ export default function ListeParticipants(): React.JSX.Element {
               name={`nat-${d._id}`}
               checked={decisions[d._id] === 'APPROVED'}
               onChange={() => setDecision(d._id, 'APPROVED')}
-            />{' '}قبول
+            />{' '}
+            قبول
           </label>
           <label style={{ marginInlineStart: 12 }}>
             <input
@@ -214,7 +377,8 @@ export default function ListeParticipants(): React.JSX.Element {
               name={`nat-${d._id}`}
               checked={decisions[d._id] === 'REJECTED'}
               onChange={() => setDecision(d._id, 'REJECTED')}
-            />{' '}رفض
+            />{' '}
+            رفض
           </label>
         </>
       );
@@ -239,7 +403,11 @@ export default function ListeParticipants(): React.JSX.Element {
       );
       alert('تمّ حفظ القرارات الوطنية بنجاح ✅');
       setDemandes(prev =>
-        prev.map(d => (decisions[d._id] ? { ...d, statusNational: decisions[d._id] } : d))
+        prev.map(d =>
+          decisions[d._id]
+            ? { ...d, statusNational: decisions[d._id] }
+            : d
+        )
       );
       setDecisions({});
     } catch (e: any) {
@@ -248,16 +416,47 @@ export default function ListeParticipants(): React.JSX.Element {
   }
 
   const onBack = () => nav('/moderator/gestionparticipants');
-  const headerTitle = `${sessionMeta?.title ?? ''} — ${fmtMonth(sessionMeta?.startDate)} — ${selection.niveau}`;
+  const headerTitle = `${sessionMeta?.title ?? ''} — ${fmtMonth(
+    sessionMeta?.startDate
+  )} — ${selection.niveau}`;
 
   return (
-    <div dir="rtl" style={{ width: '90vw', marginInline: 20, paddingInline: 24 }}>
+    <div
+      dir="rtl"
+      style={{ width: '90vw', marginInline: 20, paddingInline: 24 }}
+    >
       <div style={styles.toolbar}>
         <div style={styles.toolbarRight}>
-          <button onClick={onBack} style={styles.circleRedBtn}><ArrowRightIcon /></button>
+          <button onClick={onBack} style={styles.circleRedBtn}>
+            <ArrowRightIcon />
+          </button>
           <span>{headerTitle}</span>
         </div>
+
+        {/* Pagination header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>
+            الصفحة {page} / {maxPage} — المجموع: {total}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page <= 1 || loading}
+            style={styles.pillSecondary}
+          >
+            الصفحة السابقة
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage(p => Math.min(maxPage, p + 1))}
+            disabled={page >= maxPage || loading}
+            style={styles.pillSecondary}
+          >
+            الصفحة التالية
+          </button>
+        </div>
       </div>
+
       <div style={styles.redLine} />
 
       {loading && <div>... جاري التحميل</div>}
@@ -318,7 +517,9 @@ export default function ListeParticipants(): React.JSX.Element {
 
               {/* Colonnes snapshot dynamiques */}
               {snapshotCols.map(col => (
-                <th key={col.key} style={styles.thRight}>{col.label}</th>
+                <th key={col.key} style={styles.thRight}>
+                  {col.label}
+                </th>
               ))}
 
               <th style={styles.thRight}>قرار الجهة</th>
@@ -328,32 +529,66 @@ export default function ListeParticipants(): React.JSX.Element {
           <tbody>
             {filteredSorted.map((d, idx) => (
               <tr key={d._id}>
-                <td style={styles.tdRight}>{idx + 1}</td>
-                <td style={styles.tdRight}>{d.applicantSnapshot.idScout || '—'}</td>
-                <td style={styles.tdRight}>{d.applicantSnapshot.firstName || '—'}</td>
-                <td style={styles.tdRight}>{d.applicantSnapshot.lastName || '—'}</td>
-                <td style={styles.tdRight}>{d.applicantSnapshot.region || '—'}</td>
+                <td style={styles.tdRight}>{skip + idx + 1}</td>
+                <td style={styles.tdRight}>
+                  {d.applicantSnapshot.idScout || '—'}
+                </td>
+                <td style={styles.tdRight}>
+                  {d.applicantSnapshot.firstName || '—'}
+                </td>
+                <td style={styles.tdRight}>
+                  {d.applicantSnapshot.lastName || '—'}
+                </td>
+                <td style={styles.tdRight}>
+                  {d.applicantSnapshot.region || '—'}
+                </td>
                 <td style={styles.tdRight}>{d.branche || '—'}</td>
 
                 {/* Valeurs snapshot selon niveau */}
                 {snapshotCols.map(col => (
-                  <td key={col.key} style={styles.tdRight}>{col.render(d)}</td>
+                  <td key={col.key} style={styles.tdRight}>
+                    {col.render(d)}
+                  </td>
                 ))}
 
-                <td style={styles.tdRight}><StatusBadge value={d.statusRegion} /></td>
+                <td style={styles.tdRight}>
+                  <StatusBadge value={d.statusRegion} />
+                </td>
                 <td style={styles.tdRight}>{renderNationalCell(d)}</td>
               </tr>
             ))}
             {!filteredSorted.length && !loading && (
-              <tr><td colSpan={8 + snapshotCols.length} style={{ textAlign: 'center', color: '#777' }}>لا توجد مطالب مطابقة.</td></tr>
+              <tr>
+                <td
+                  colSpan={8 + snapshotCols.length}
+                  style={{ textAlign: 'center', color: '#777' }}
+                >
+                  لا توجد مطالب مطابقة.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div style={{ textAlign: 'end', marginTop: 16 }}>
+      <div
+        style={{
+          textAlign: 'end',
+          marginTop: 16,
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: 8,
+        }}
+      >
         <button onClick={submitNationalDecisions} style={styles.pillPrimary}>
           حفظ القرارات الوطنية
+        </button>
+        <button
+          onClick={onResyncCertifs}
+          style={styles.pillPrimary}
+          disabled={syncing || loading || !demandes.length}
+        >
+          {syncing ? '... جارٍ التحديث لهذه الصفحة' : 'تحديث معطيات التدريب عن بعد لهذه الصفحة'}
         </button>
       </div>
     </div>
@@ -373,14 +608,16 @@ function StatusBadge({ value }: { value: string }) {
     PENDING: 'قيد الدراسة',
   };
   return (
-    <span style={{
-      padding: '2px 8px',
-      borderRadius: 999,
-      background: 'rgba(0,0,0,0.05)',
-      color: colors[value] || '#000',
-      fontSize: 12,
-      fontWeight: 700,
-    }}>
+    <span
+      style={{
+        padding: '2px 8px',
+        borderRadius: 999,
+        background: 'rgba(0,0,0,0.05)',
+        color: colors[value] || '#000',
+        fontSize: 12,
+        fontWeight: 700,
+      }}
+    >
       {labels[value] || value}
     </span>
   );
@@ -388,26 +625,71 @@ function StatusBadge({ value }: { value: string }) {
 
 /* ---------- styles ---------- */
 const styles: Record<string, React.CSSProperties> = {
-  toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 20 },
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 20,
+  },
   toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 } as any,
   circleRedBtn: {
-    width: 46, height: 46, borderRadius: 14, background: 'transparent',
-    border: `3px solid ${RED}`, color: RED, display: 'grid', placeItems: 'center', cursor: 'pointer',
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    background: 'transparent',
+    border: `3px solid ${RED}`,
+    color: RED,
+    display: 'grid',
+    placeItems: 'center',
+    cursor: 'pointer',
   },
-  redLine: { height: 3, background: RED, borderRadius: 2, margin: '8px 0' },
+  redLine: {
+    height: 3,
+    background: RED,
+    borderRadius: 2,
+    margin: '8px 0',
+  },
   metaLine: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 },
   badges: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   badgeButton: {
-    border: `1px solid ${RED}`, color: RED, background: 'transparent',
-    padding: '4px 10px', borderRadius: 999, cursor: 'pointer', fontSize: 13,
+    border: `1px solid ${RED}`,
+    color: RED,
+    background: 'transparent',
+    padding: '4px 10px',
+    borderRadius: 999,
+    cursor: 'pointer',
+    fontSize: 13,
   },
   badgeActive: { background: RED, color: '#fff' },
   table: { width: '100%', borderCollapse: 'collapse', background: '#fff' },
-  thRight: { textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid #eef2f7' },
-  tdRight: { textAlign: 'right', padding: '10px 12px', borderTop: '1px solid #f3f4f6' },
+  thRight: {
+    textAlign: 'right',
+    padding: '10px 12px',
+    borderBottom: '1px solid #eef2f7',
+  },
+  tdRight: {
+    textAlign: 'right',
+    padding: '10px 12px',
+    borderTop: '1px solid #f3f4f6',
+  },
   pillPrimary: {
-    padding: '10px 16px', borderRadius: 999, border: `1px solid ${RED}`,
-    background: RED, color: '#fff', cursor: 'pointer', fontWeight: 700,
+    padding: '10px 16px',
+    borderRadius: 999,
+    border: `1px solid ${RED}`,
+    background: RED,
+    color: '#fff',
+    cursor: 'pointer',
+    fontWeight: 700,
+  },
+  pillSecondary: {
+    padding: '6px 10px',
+    borderRadius: 999,
+    border: `1px solid ${RED}`,
+    background: '#fff',
+    color: RED,
+    cursor: 'pointer',
+    fontSize: 13,
   },
 };
 
@@ -415,8 +697,14 @@ const styles: Record<string, React.CSSProperties> = {
 function ArrowRightIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24">
-      <path d="M8 5l8 7-8 7" fill="none" stroke="currentColor" strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M8 5l8 7-8 7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

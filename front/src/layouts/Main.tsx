@@ -2,6 +2,12 @@
 import React, { type CSSProperties } from 'react';
 import { Outlet, useNavigate, NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/UseAuth';
+import {
+  isAdmin,
+  canAccessModeratorNational,
+  canAccessModeratorRegional,
+  canAccessDirectorSpace,
+} from '../utils/role';
 
 const RED1 = '#e20514';
 const RED2 = '#b80d1d';
@@ -47,20 +53,26 @@ export default function MainLayout(): React.JSX.Element {
           <MenuLink to="/acceuil">الرئيسية</MenuLink>
           <MenuLink to="/parcours">مساري التدريبي</MenuLink>
           <MenuLink to="/participation">طلب المشاركة في دورة تدريبية</MenuLink>
-
+          {canAccessModeratorNational(user) && (
             <>
               <MenuLink to="/moderator">فضاء إدارة التدريب</MenuLink>
             </>
-
+            )}
+            {canAccessDirectorSpace(user) && (
             <>
-              <MenuLink to="/admin">فضاء قائد الدورة</MenuLink>
+              <MenuLink to="/trainer">فضاء قائد الدورة</MenuLink>
             </>
+            )}
+            {isAdmin(user) && (
             <>
               <MenuLink to='/superadmin'>فضاء اللجنة الوطنية </MenuLink>
             </>
+            )}
+            {canAccessModeratorRegional(user) && (
                         <>
               <MenuLink to='/adminregion'>فضاء اللجنة الجهوية </MenuLink>
             </>
+            )}
 
           <MenuLink to="/contact_us">إتصل بنا</MenuLink>
         </nav>

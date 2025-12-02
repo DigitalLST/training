@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const morgan  = require('morgan');
 const cors    = require('cors');
+const path = require('path');
 const mongoose = require('mongoose');
 const AuthRouter=require('./routes/auth');
 const ContactRouter=require('./routes/contact');
@@ -14,10 +15,14 @@ const FormationRoutes= require('./routes/formation');
 const SeedDemandeRoutes=require('./routes/dev.seed.demandes.byIdScout');
 const SeedFormationRoutes=require('./routes/dev.seed.formation');
 const AffectationRoutes=require('../src/routes/affectations');
-const ModeratorRoutes=require('../src/routes/moderators')
+const ModeratorRoutes=require('../src/routes/moderators');
+const evaluationRoutes = require('../src/routes/evaluations');
+const decisionRoutes=require('../src/routes/finalDecision');
+const meRoutes = require('../src/routes/me');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const SIGNATURE_DIR = process.env.SIGNATURE_UPLOAD_DIR || 'uploads/signatures';
 /*app.listen(PORT, () => console.log('API listening on', PORT));*/
 app.use(cors());
 app.use(express.json());
@@ -34,6 +39,13 @@ app.use('/api/demandes', DemandeParticipationRoutes);
 app.use('/api/formations',FormationRoutes);
 app.use('/api/affectations',AffectationRoutes);
 app.use('/api/moderators',ModeratorRoutes);
+app.use('/api/evaluations', evaluationRoutes);
+app.use('/api/final-decisions', decisionRoutes);
+app.use(
+  '/static/signatures',
+  express.static(path.join(__dirname, SIGNATURE_DIR))
+);
+app.use('/api', meRoutes);
 app.set('etag', false); 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 

@@ -45,6 +45,11 @@ async function fetchCertifsByIdKachefa(idKachefa) {
   console.log('[e-training] content-type:', ct);
   console.log('[e-training] body preview:', body.slice(0, 200));
 
+  // 👉 cas rate-limit: on renvoie une erreur explicite
+  if (resp.status === 429) {
+    throw new Error('ETRAINING_RATE_LIMIT');
+  }
+
   if (!ct.includes('application/json')) {
     throw new Error(`e-training non JSON response: ${resp.status}`);
   }
@@ -61,6 +66,71 @@ async function fetchCertifsByIdKachefa(idKachefa) {
     code:  c.code ?? '',
     date:  c.date ? new Date(c.date) : null,
   }));
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function refreshCertifsForSession(sessionId) {
+  const demandes = await Demande.find({ session: sessionId })
+    .select('_id applicant trainingLevel branche certifsSnapshot applicantSnapshot')
+    .populate({
+      path: 'applicant',
+      select: 'idScout scoutId idKachefa kachefaId prenom nom email region',
+    })
+    .lean();
+
+  for (const d of demandes) {
+    const u = d.applicant;
+    if (!u) continue;
+
+    const idScout =
+      u.idScout ||
+      u.scoutId ||
+      u.idKachefa ||
+      u.kachefaId ||
+      d.applicantSnapshot?.idScout ||
+      '';
+
+    if (!idScout || !/^\d{10}$/.test(String(idScout))) {
+      // pas d’ID exploitable → on skip
+      continue;
+    }
+
+    let snap = d.certifsSnapshot || [];
+    let attempts = 0;
+
+    while (attempts < 3) {
+      attempts++;
+      try {
+        snap = await fetchCertifsByIdKachefa(String(idScout));
+        break; // succès → on sort du while
+      } catch (e) {
+        const msg = String(e?.message || '');
+        console.error('[e-training refresh] error for', idScout, msg);
+
+        // Si c’est un 429, on attend puis on retente
+        if (msg.includes('429')) {
+          // backoff progressif : 1s, puis 2s, puis 3s
+          await delay(1000 * attempts);
+          continue;
+        }
+
+        // autre erreur → on abandonne pour cet utilisateur
+        break;
+      }
+    }
+
+    // on sauve même si c’est resté à l’ancien snapshot
+    await Demande.updateOne(
+      { _id: d._id },
+      { $set: { certifsSnapshot: snap } }
+    );
+
+    // petit délai global entre chaque user pour ne pas saturer même sans 429
+    await delay(200);
+  }
 }
 
 /* ================================================================ */
@@ -223,16 +293,122 @@ router.patch('/:id/national', requireAuth, async (req, res, next) => {
 });
 
 /* ---------- Liste des demandes d'une session ----------
-  GET /api/demandes?sessionId=...&trainingLevel=...
+  GET /api/demandes?sessionId=...&trainingLevel=...&skip=0&limit=100
 -------------------------------------------------------- */
 router.get('/', requireAuth, async (req, res, next) => {
   try {
     const { sessionId, trainingLevel } = req.query;
+    const skip  = Number(req.query.skip  ?? 0);
+    const limit = Math.min(Number(req.query.limit ?? 50), 200); // garde un max raisonnable
+
     if (!isValidId(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' });
+
     const filt = { session: sessionId };
     if (trainingLevel) filt.trainingLevel = trainingLevel;
-    const list = await Demande.find(filt).lean();
-    res.json(list);
+
+    const [list, total] = await Promise.all([
+      Demande.find(filt)
+        .sort({ createdAt: 1 })     // ⚠️ important : ordre stable pour pagination
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Demande.countDocuments(filt),
+    ]);
+
+    res.json({
+      items: list,
+      total,
+      skip,
+      limit,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+/**
+ * POST /api/demandes/resync-page
+ * Body (ou query): { sessionId, skip, limit }
+ */
+router.post('/resync-page', requireAuth, async (req, res, next) => {
+  try {
+    const sessionId = req.body.sessionId || req.query.sessionId;
+    const skip  = Number(req.body.skip  ?? req.query.skip  ?? 0);
+    const limit = Math.min(Number(req.body.limit ?? req.query.limit ?? 50), 200);
+
+    if (!isValidId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId' });
+    }
+
+    // TODO: contrôle d'accès (moderator / director / trainer autorisé sur cette session)
+
+    // On récupère toutes les demandes de la session, triées de façon stable
+    const filt = { session: sessionId };
+    const total = await Demande.countDocuments(filt);
+
+    const demandes = await Demande.find(filt)
+      .sort({ createdAt: 1 }) // ↩️ même ordre que le GET
+      .skip(skip)
+      .limit(limit)
+      .populate({
+        path: 'applicant',
+        select: 'idScout scoutId idKachefa kachefaId prenom nom email region',
+      })
+      .lean();
+
+    let processed = 0;
+    let rateLimited = false;
+
+    for (const d of demandes) {
+      const u = d.applicant;
+      if (!u) continue;
+
+      const idScout =
+        u.idScout ||
+        u.scoutId ||
+        u.idKachefa ||
+        u.kachefaId ||
+        d.applicantSnapshot?.idScout ||
+        '';
+
+      if (!idScout || !/^\d{10}$/.test(String(idScout))) {
+        continue;
+      }
+
+      let snap = d.certifsSnapshot || [];
+
+      try {
+        // petit délai pour éviter de spammer l'APIGW
+        await delay(150);
+
+        snap = await fetchCertifsByIdKachefa(String(idScout));
+      } catch (e) {
+        const msg = String(e?.message || '');
+        console.error('[e-training refresh-page] error for', idScout, msg);
+
+        if (msg === 'ETRAINING_RATE_LIMIT') {
+          rateLimited = true;
+          break; // on stoppe la boucle, on renvoie processed tel quel
+        }
+
+        // autre erreur: on laisse l'ancien snapshot
+        snap = d.certifsSnapshot || [];
+      }
+
+      await Demande.updateOne(
+        { _id: d._id },
+        { $set: { certifsSnapshot: snap } }
+      );
+      processed++;
+    }
+
+    return res.json({
+      ok: true,
+      processed,          // nb de demandes réellement rafraîchies
+      totalInPage: demandes.length,
+      totalAll: total,
+      rateLimited,        // true si on s'est arrêté à cause d'un 429
+      next: rateLimited ? null : { sessionId, nextSkip: skip + limit, limit },
+    });
   } catch (err) {
     next(err);
   }

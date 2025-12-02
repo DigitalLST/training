@@ -9,22 +9,21 @@ type Assign = { user: UserLite; role: Role };
 
 // Contexte: on accepte formationId *ou* sessionId selon d'où on vient
 type RawCtx = {
-  formationId?: string; fid?: string; // navigation depuis liste formations
-  sessionId?: string; sid?: string;   // navigation depuis une session
+  formationId?: string; fid?: string;
+  sessionId?: string; sid?: string;
   title?: string; sessionTitle?: string; name?: string;
   type?: string; TypeSession?: string; sessionType?: string;
   period?: string; dates?: string; range?: string;
 };
 
 type Ctx = {
-  sid: string;                    // sessionId résolu (utile pour l’en-tête)
-  fid?: string | null;            // formationId obligatoire pour les affectations
+  sid: string;
+  fid?: string | null;
   title?: string;
   type?: string;
   period?: string;
 };
 
-// lecture / stockage local (pour garder le contexte au retour)
 const STORE_KEY = 'aff_ctx_v2';
 
 function readCtxFromStorage(): Ctx | null {
@@ -58,7 +57,6 @@ export default function GestionAffectation(): React.ReactElement | null {
 
   const fromState = React.useMemo(() => normalizeCtx(loc.state), [loc.state]);
   const fromStorage = React.useMemo(() => readCtxFromStorage(), []);
-  // on fusionne: priorité au state, puis storage
   const [ctx, setCtx] = React.useState<Ctx | null>(() => {
     const base = fromStorage || ({} as Ctx);
     const over = fromState || {};
@@ -71,7 +69,6 @@ export default function GestionAffectation(): React.ReactElement | null {
     };
   });
 
-  // ---- infos formation pour l’en-tête ----
   const [formationInfo, setFormationInfo] = React.useState<{
     nom?: string;
     niveau?: string;
@@ -81,7 +78,6 @@ export default function GestionAffectation(): React.ReactElement | null {
     sessionTitle?: string;
   } | null>(null);
 
-  // si on a reçu du state, on persiste
   React.useEffect(() => {
     if (fromState) {
       const merged: Ctx = {
@@ -101,12 +97,10 @@ export default function GestionAffectation(): React.ReactElement | null {
   React.useEffect(() => {
     (async () => {
       if (!ctx) return;
-      if (!ctx.fid) return; // formationId requis désormais
+      if (!ctx.fid) return;
 
       try {
         const f = await api(`/formations/${ctx.fid}`);
-        // f: { sessionId, sessionTitle, niveau, nom, branches, centre:{title,region}, ... }
-        // 1) set header formation details
         setFormationInfo({
           nom: f?.nom,
           niveau: f?.niveau,
@@ -115,7 +109,6 @@ export default function GestionAffectation(): React.ReactElement | null {
           branches: Array.isArray(f?.branches) ? f.branches : [],
           sessionTitle: f?.sessionTitle || '',
         });
-        // 2) resolve / compléter sessionId + titre session
         if (!ctx.sid || !ctx.title) {
           const next: Ctx = {
             fid: ctx.fid,
@@ -133,35 +126,31 @@ export default function GestionAffectation(): React.ReactElement | null {
     })();
   }, [ctx]);
 
-  // garde-fou: sans formation id -> back
   React.useEffect(() => {
     if (!ctx?.fid) {
       nav('/moderator/gestionparticipant', { replace: true });
     }
   }, [ctx?.fid, nav]);
 
-  if (!ctx?.fid) return null; // le temps du redirect éventuel
+  if (!ctx?.fid) return null;
 
-  // -------- état data & UI --------
   const { fid } = ctx;
   const [sessionTitle, setSessionTitle] = React.useState(ctx.title ?? '');
-
-
   React.useEffect(() => { setSessionTitle(ctx.title ?? ''); }, [ctx.title]);
 
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving]   = React.useState(false);
-  const [err, setErr]         = React.useState<string|null>(null);
+  const [loading, setLoading]   = React.useState(true);
+  const [saving, setSaving]     = React.useState(false);
+  const [err, setErr]           = React.useState<string|null>(null);
 
-  const [assigns, setAssigns] = React.useState<Assign[]>([]);
-  const [initial, setInitial] = React.useState<Assign[]>([]);
+  const [assigns, setAssigns]   = React.useState<Assign[]>([]);
+  const [initial, setInitial]   = React.useState<Assign[]>([]);
 
-  const [role, setRole] = React.useState<Role>('trainee');
-  const [q, setQ]       = React.useState('');
-  const [sugs, setSugs] = React.useState<UserLite[]>([]);
-  const [hi, setHi]     = React.useState(0);
+  const [role, setRole]         = React.useState<Role>('trainee');
+  const [q, setQ]               = React.useState('');
+  const [sugs, setSugs]         = React.useState<UserLite[]>([]);
+  const [hi, setHi]             = React.useState(0);
 
-  // charge les affectations existantes (par formation)
+  // charge les affectations existantes (tous rôles)
   React.useEffect(() => {
     (async () => {
       if (!fid) return;
@@ -169,7 +158,18 @@ export default function GestionAffectation(): React.ReactElement | null {
         setLoading(true);
         setErr(null);
         const list = await api(`/affectations/formations/${fid}/affectations`);
-        const mapped: Assign[] = (list || []).map((a: any) => ({ user: a.user, role: a.role as Role }));
+        const mapped: Assign[] = (list || [])
+          .filter((a: any) => a.user) // ignore les affectations sans user si jamais
+          .map((a: any) => ({
+            user: {
+              _id: a.user._id,
+              prenom: a.user.prenom,
+              nom: a.user.nom,
+              email: a.user.email,
+              idScout: a.user.idScout,
+            },
+            role: a.role as Role,
+          }));
         setAssigns(mapped);
         setInitial(mapped);
       } catch (e: any) {
@@ -180,17 +180,29 @@ export default function GestionAffectation(): React.ReactElement | null {
     })();
   }, [fid]);
 
-  // auto-complétion via endpoints candidats (par formation)
+  // auto-complétion / suggestions
   React.useEffect(() => {
+    if (!fid) return;
+
+    if (role === 'trainee') {
+      (async () => {
+        try {
+          setErr(null);
+          const res = await api(`/affectations/formations/${fid}/candidates?role=trainee`);
+          setSugs(Array.isArray(res) ? res : []);
+          setHi(0);
+        } catch (e: any) {
+          setErr(e?.message || 'تعذر تحميل المترشحين');
+        }
+      })();
+      return;
+    }
+
     if (!q.trim()) { setSugs([]); return; }
+
     const t = setTimeout(async () => {
       try {
         setErr(null);
-        if (!fid) {
-          setSugs([]);
-          setErr('formationId manquant');
-          return;
-        }
         const params = new URLSearchParams();
         params.set('role', role);
         params.set('q', q.trim());
@@ -202,6 +214,7 @@ export default function GestionAffectation(): React.ReactElement | null {
         setErr(e?.message || 'تعذر البحث');
       }
     }, 250);
+
     return () => clearTimeout(t);
   }, [q, role, fid]);
 
@@ -210,23 +223,48 @@ export default function GestionAffectation(): React.ReactElement | null {
       const i = prev.findIndex(a => a.user._id === u._id);
       if (i >= 0) {
         const next = [...prev];
-        next[i] = { ...next[i], role: r }; // un seul rôle par user sur la formation
+        next[i] = { ...next[i], role: r };
         return next;
       }
       return [...prev, { user: u, role: r }];
     });
-    setQ(''); setSugs([]); setHi(0);
+    setQ('');
+    if (role !== 'trainee') {
+      setSugs([]);
+      setHi(0);
+    }
   }
 
   function removeUser(uid: string) {
     setAssigns(prev => prev.filter(a => a.user._id !== uid));
   }
 
+  function addAllTrainees() {
+    setAssigns(prev => {
+      const byId = new Map<string, Assign>();
+      prev.forEach(a => {
+        byId.set(a.user._id, a);
+      });
+      sugs.forEach(u => {
+        const existing = byId.get(u._id);
+        if (existing) {
+          byId.set(u._id, { ...existing, role: 'trainee' });
+        } else {
+          byId.set(u._id, { user: u, role: 'trainee' });
+        }
+      });
+      return Array.from(byId.values());
+    });
+  }
+
+  function clearAllTrainees() {
+    setAssigns(prev => prev.filter(a => a.role !== 'trainee'));
+  }
+
   async function onSave() {
     try {
       setSaving(true); setErr(null);
 
-      // diff calcul
       const toMap = (xs: Assign[]) => new Map(xs.map(a => [a.user._id, a.role]));
       const cur = toMap(assigns);
       const init = toMap(initial);
@@ -255,6 +293,7 @@ export default function GestionAffectation(): React.ReactElement | null {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (role === 'trainee') return;
     if (!sugs.length) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => (h + 1) % sugs.length); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => (h - 1 + sugs.length) % sugs.length); }
@@ -265,7 +304,13 @@ export default function GestionAffectation(): React.ReactElement | null {
   const trainers = assigns.filter(a => a.role === 'trainer');
   const trainees = assigns.filter(a => a.role === 'trainee');
 
-  // ——— header composed title ———
+  function handleDeleteAllTrainees() {
+    if (!trainees.length) return;
+    const ok = window.confirm('هل أنت متأكد من حذف جميع المتدربين من هذه الدورة؟');
+    if (!ok) return;
+    clearAllTrainees();
+  }
+
   const formationHeader = React.useMemo(() => {
     if (!formationInfo) return '';
     const parts: string[] = [];
@@ -298,13 +343,8 @@ export default function GestionAffectation(): React.ReactElement | null {
           </button>
 
           <span>
-            {/* Session side */}
             {sessionTitle || formationInfo?.sessionTitle || 'جلسة'}
-
-            {/* Separator */}
             {' | '}
-
-            {/* Formation details */}
             {formationHeader}
           </span>
         </div>
@@ -315,10 +355,16 @@ export default function GestionAffectation(): React.ReactElement | null {
       <div style={styles.card}>
         <div style={{ display:'grid', gap:8 }}>
           <label style={styles.label}>إضافة متدرب / قيادة الدورة</label>
-          <div style={{ display:'flex', gridTemplateColumns:'1fr 220px 56px', gap:8 }}>
+          <div style={{ display:'flex', gap:8 }}>
             <select
               value={role}
-              onChange={e => setRole(e.target.value as Role)}
+              onChange={e => {
+                const r = e.target.value as Role;
+                setRole(r);
+                setQ('');
+                setSugs([]);
+                setHi(0);
+              }}
               style={styles.selection}
             >
               <option value="trainee">{ROLE_LABEL.trainee}</option>
@@ -326,25 +372,29 @@ export default function GestionAffectation(): React.ReactElement | null {
               <option value="director">{ROLE_LABEL.director}</option>
             </select>
 
-            <input
-              style={styles.input}
-              placeholder="البريد / المعرف الكشفي / الاسم / اللقب"
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              onKeyDown={onKeyDown}
-            />
-            <button
-              type="button"
-              onClick={() => sugs[hi] && addOrUpdate(sugs[hi], role)}
-              style={styles.squareRedBtn}
-              title="إضافة"
-              disabled={!sugs.length}
-            >
-              <PlusIcon />
-            </button>
+            {role !== 'trainee' && (
+              <>
+                <input
+                  style={styles.input}
+                  placeholder="البريد / المعرف الكشفي / الاسم / اللقب"
+                  value={q}
+                  onChange={e => setQ(e.target.value)}
+                  onKeyDown={onKeyDown}
+                />
+                <button
+                  type="button"
+                  onClick={() => sugs[hi] && addOrUpdate(sugs[hi], role)}
+                  style={styles.squareRedBtn}
+                  title="إضافة"
+                  disabled={!sugs.length}
+                >
+                  <PlusIcon />
+                </button>
+              </>
+            )}
           </div>
 
-          {q.trim() && sugs.length > 0 && (
+          {role !== 'trainee' && q.trim() && sugs.length > 0 && (
             <div style={styles.dropdown}>
               {sugs.map((u, i) => (
                 <button
@@ -357,6 +407,54 @@ export default function GestionAffectation(): React.ReactElement | null {
                   <div style={{ opacity: .75, fontSize: 12 }}>#{u.idScout}</div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {role === 'trainee' && (
+            <div style={{ display:'grid', gap:8 }}>
+              <div style={{ display:'flex', justifyContent:'flex-start', gap:8 }}>
+                <button
+                  type="button"
+                  onClick={addAllTrainees}
+                  disabled={!sugs.length}
+                  style={styles.pillPrimarySmall}
+                >
+                  إضافة الكل
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllTrainees}
+                  disabled={!trainees.length}
+                  style={styles.pillGhostSmall}
+                >
+                  إلغاء الكل
+                </button>
+              </div>
+
+              <div style={styles.candidateWrap}>
+                {sugs.map(u => {
+                  const selected = trainees.some(a => a.user._id === u._id);
+                  return (
+                    <button
+                      key={u._id}
+                      type="button"
+                      onClick={() => selected ? removeUser(u._id) : addOrUpdate(u, 'trainee')}
+                      style={{
+                        ...styles.chip,
+                        background: selected ? RED : '#fff',
+                        color: selected ? '#fff' : '#111827',
+                        borderColor: selected ? RED : '#e5e7eb',
+                      }}
+                    >
+                      <span>{u.prenom} {u.nom}</span>
+                      <span style={{ fontSize: 12, opacity: .85 }}>#{u.idScout}</span>
+                    </button>
+                  );
+                })}
+                {!sugs.length && (
+                  <Empty>لا يوجد مترشحون لهذه الدورة</Empty>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -384,16 +482,28 @@ export default function GestionAffectation(): React.ReactElement | null {
             {!trainers.length && <Empty>لم يتم اضافة قيادة الدورة بعد</Empty>}
           </List>
 
-          <List title="المتدربون">
-            {trainees.map(a => (
-              <Chip
-                key={a.user._id}
-                label={`${a.user.prenom} ${a.user.nom}`}
-                onRemove={() => removeUser(a.user._id)}
-              />
-            ))}
-            {!trainees.length && <Empty>لم يتم اضافة المتدربين بعد</Empty>}
-          </List>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <List title="المتدربون">
+              {trainees.map(a => (
+                <Chip
+                  key={a.user._id}
+                  label={`${a.user.prenom} ${a.user.nom}`}
+                  onRemove={() => removeUser(a.user._id)}
+                />
+              ))}
+              {!trainees.length && <Empty>لم يتم اضافة المتدربين بعد</Empty>}
+            </List>
+
+            {trainees.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteAllTrainees}
+                style={styles.dangerSmallBtn}
+              >
+                حذف جميع المتدربين
+              </button>
+            )}
+          </div>
         </div>
 
         {loading && <div style={{ color:'#6b7280' }}>… جاري التحميل</div>}
@@ -482,11 +592,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize:16, outline:'none', width:400,
   },
   selection: {
-    border:'1px solid #e5e7eb', borderRadius:12, padding:'10px 12px', width:200,
+    border:'1px solid #e5e7eb', borderRadius:12, padding:'10px 12px', minWidth:200,
     fontSize:16, outline:'none',
   },
   dropdown: { border:'1px solid #e5e7eb', borderRadius:12, overflow:'hidden' },
   suggestion: { width:'100%', textAlign:'right', padding:'10px 12px', border:0, cursor:'pointer' },
+
+  candidateWrap: {
+    display:'flex',
+    flexWrap:'wrap',
+    gap:8,
+    marginTop:10,
+  },
 
   actions: { display:'flex', gap:10, justifyContent:'flex-end', marginTop:6 },
 
@@ -497,6 +614,14 @@ const styles: Record<string, React.CSSProperties> = {
   pillGhost: {
     padding:'10px 16px', borderRadius:999, border:`1px solid ${RED}`,
     background:'transparent', color:RED, cursor:'pointer', fontWeight:700,
+  },
+  pillPrimarySmall: {
+    padding:'6px 12px', borderRadius:999, border:`1px solid ${RED}`,
+    background: RED, color:'#fff', cursor:'pointer', fontWeight:700, fontSize:13,
+  },
+  pillGhostSmall: {
+    padding:'6px 12px', borderRadius:999, border:`1px solid ${RED}`,
+    background:'transparent', color:RED, cursor:'pointer', fontWeight:700, fontSize:13,
   },
   squareRedBtn: {
     width: 46, height: 46, borderRadius: 14, background: 'transparent',
@@ -520,4 +645,16 @@ const styles: Record<string, React.CSSProperties> = {
   },
   itemRight: { display: 'grid', justifyItems: 'start' },
   itemTitle: { fontSize: 18, fontWeight: 200, color: '#374151' },
+  dangerSmallBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    padding: '6px 12px',
+    borderRadius: 999,
+    border: '1px solid #b91c1c',
+    background: '#fee2e2',
+    color: '#b91c1c',
+    cursor: 'pointer',
+    fontWeight: 700,
+    fontSize: 13,
+  },
 };

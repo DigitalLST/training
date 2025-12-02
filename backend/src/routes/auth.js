@@ -8,6 +8,7 @@ const { signUser } = require('../utils/tokens');
 const ResetToken = require('../models/ResetToken');
 const requireAuth = require('../middlewares/auth');
 const { sendResetMail } = require('../services/mailer'); // ✅ on réutilise le transporteur existant
+const FormationAffectation = require('../models/affectation');
 
 const router = express.Router();
 
@@ -22,7 +23,21 @@ function frontBase(req) {
   if (origin) return origin;
   return 'http://localhost:5173';
 }
+// Retourne un JSON du user enrichi avec les flags de session
+async function toAuthJson(user) {
+  if (!user) return null;
 
+  const [trainer, director] = await Promise.all([
+    FormationAffectation.exists({ user: user._id, role: 'trainer' }),
+    FormationAffectation.exists({ user: user._id, role: 'director' }),
+  ]);
+
+  const json = user.toJSON();
+  json.isSessionTrainer = !!trainer;
+  json.isSessionDirector = !!director;
+
+  return json;
+}
 /**
  * POST /api/auth/register
  */
@@ -85,7 +100,8 @@ router.post(
       if (!ok) return res.status(401).json({ error: 'Identifiants invalides' });
 
       const token = signUser(user);
-      return res.json({ token, user: user.toJSON() });
+      const authUser = await toAuthJson(user);
+      return res.json({ token, user: authUser });
     } catch (e) {
       return res.status(500).json({ error: 'Erreur serveur', details: e.message });
     }
@@ -103,8 +119,8 @@ router.get('/me', requireAuth, async (req, res) => {
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
   res.set('Vary', 'Authorization');
-
-  return res.json(me.toJSON());
+  const authUser = await toAuthJson(me);
+  return res.json(authUser);
 });
 
 /**

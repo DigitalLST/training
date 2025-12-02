@@ -5,6 +5,7 @@ import ProtectedSection from './components/ProtectedSection';
 import MainLayout from './layouts/Main';
 import PublicLayout from './layouts/Public';
 import ModeratorLayout from './layouts/Moderator';
+import TrainerLayout from './layouts/Trainer';
 import HomeMain from './main/screens/Home';
 import LandingMain from './main/screens/Landing';
 import Parcour from './main/screens/Parcour';
@@ -33,6 +34,13 @@ import AddFormationModerator from './moderator/screens/AddFormation';
 import EditFormationModerator from './moderator/screens/UpdateFormation';
 import GestionAffectationModerator from './moderator/screens/GestionAffectation';
 import GestionModerator from './moderator/screens/GestionModerator';
+import ResultatFinaleModerator from './moderator/screens/ResultatFinale';
+import ResultatDetailModerator from './moderator/screens/ٍResultatDetail';
+import TrainerHome from './trainer/screens/Home';
+import InfoTrainee from './trainer/screens/InfosTrainee';
+import EvalutaionTrainee from './trainer/screens/EvalutaionTrainee';
+import EvaluationFinale from './trainer/screens/EvaluationFinale';
+
 export default function App() {
   return (
     <Routes>
@@ -100,8 +108,27 @@ export default function App() {
           <Route path="updateformation" element={<EditFormationModerator />} />
           <Route path="participantformation" element={<GestionAffectationModerator />} />
           <Route path="gestionmoderators" element={<GestionModerator />} />
+          <Route path="finalresults" element={<ResultatFinaleModerator />} />
+          <Route path="detailresults" element={<ResultatDetailModerator />} />
 
 
+        </Route> 
+      </Route>  
+      <Route element={<RequireAuth />}>
+        {/* ----- Moderator ----- */}
+        <Route
+          path="/trainer/*"
+          element={
+            <ProtectedSection section="director_space">
+              <TrainerLayout />
+            </ProtectedSection>
+          }
+        >
+          <Route index element={<TrainerHome />} />
+          <Route path="infostrainee" element={<InfoTrainee />} />
+          <Route path="evaluationtrainee" element={<EvalutaionTrainee />} />
+          <Route path="resultattrainee" element={<EvaluationFinale />} />
+          
         </Route> 
       </Route>  
     </Routes>

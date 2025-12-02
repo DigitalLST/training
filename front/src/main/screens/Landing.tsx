@@ -2,11 +2,17 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/UseAuth';
+import {
+  isAdmin,
+  canAccessModeratorNational,
+  canAccessModeratorRegional,
+  canAccessDirectorSpace,
+} from '../../utils/role';
 
 //const asBool = (v: unknown) => v === true || v === 'true' || v === 1 || v === '1';
 
 export default function LandingMain(): React.JSX.Element {
-  const {  loading } = useAuth();
+  const {  loading,user } = useAuth();
   const nav = useNavigate();
 
   if (loading) return <></>;
@@ -21,14 +27,18 @@ export default function LandingMain(): React.JSX.Element {
         <Card onClick={()=>nav('/participation')}    img="/parcours.png"     title="طلب المشاركة في دورة تدريبية" />
         <Card onClick={()=>nav('/parcours')}    img="/parcours.png"     title="مساري التدريبي" />
 
-
+  {canAccessModeratorNational(user) && (
   <Card onClick={()=>nav('/moderator')} img="" title="فضاء إدارة التدريب" />
-
-  <Card onClick={()=>nav('/admin')} img="" title="فضاء قائد الدورة" />
-
+)}
+ {canAccessDirectorSpace(user) && (
+  <Card onClick={()=>nav('/trainer')} img="" title="فضاء قائد الدورة" />
+  )}
+ {isAdmin(user) && (
   <Card onClick={()=>nav('/superadmin')} img="/national_committee.png" title="فضاء اللجنة الوطنية" />
+  )}
+   {canAccessModeratorRegional(user) && (
     <Card onClick={()=>nav('/adminregion')} img="/national_committee.png" title="فضاء اللجنة الجهوية" />
-
+)}
         <Card onClick={()=>nav('/contact_us')}  img="/contact_us.png"  title="إتصل بنا" />
         <Card onClick={()=>nav('/profile')}  img="/account.png"  title="تغيير معطيات الحساب" />
       </div>

@@ -10,6 +10,8 @@ export type User = {
   region: string;
   niveau: string;
   role:Role;
+  isSessionTrainer?: boolean;
+  isSessionDirector?: boolean;
 };
 
 export type AuthState = {
