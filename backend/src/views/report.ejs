@@ -46,11 +46,26 @@
       margin-bottom: 8px;
     }
 
+    /* ---------- TABLES GÉNÉRALES (avec header répété) ---------- */
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 8px;
       font-size: 12px;
+      page-break-inside: auto;
+    }
+
+    thead {
+      display: table-header-group; /* ✅ répète l’en-tête sur chaque page */
+    }
+
+    tfoot {
+      display: table-footer-group;
+    }
+
+    tr {
+      page-break-inside: avoid;    /* ✅ une ligne ne se coupe pas en deux */
+      page-break-after: auto;
     }
 
     th, td {
@@ -76,6 +91,10 @@
       margin-top: 4px;
     }
 
+    .signatures-table tr {
+      page-break-inside: avoid; /* ✅ évite une signature coupée */
+    }
+
     .page-break {
       page-break-before: always;
     }
@@ -84,6 +103,30 @@
       margin-top: 10px;
       color: #e20514;
       font-size: 16px;
+    }
+
+    /* ---------- BLOCS DE RAPPORT ---------- */
+    .report-block-title {
+      font-size: 16px;
+      font-weight: bold;
+      margin-top: 8px;
+      margin-bottom: 4px;
+    }
+
+    .report-block-text {
+      font-size: 13px;              /* un peu plus petit pour gagner de la place */
+      border: 1px solid #999;
+      padding: 6px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      line-height: 1.4;             /* interligne resserrée */
+      margin-bottom: 6px;
+      page-break-inside: auto;      /* le texte peut se couper proprement si très long */
+    }
+
+    .report-signature {
+      page-break-inside: avoid;     /* signature + nom + date restent ensemble */
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -147,9 +190,9 @@
       <tr>
         <th>عدد المشاركين</th>
         <th>عدد الحاضرين</th>
-        <th>عدد المجازين</th>
-        <th>عدد المعيدين</th>
-        <th>عدد غير المؤهلين</th>
+        <th> يؤهل</th>
+        <th> يعيد الدورة</th>
+        <th>  لا يناسب الدور</th>
         <th>نسبة النجاح</th>
       </tr>
     </thead>
@@ -169,11 +212,12 @@
     <div class="validation"><%= validationSentence %></div>
   <% } %>
 
-  <!-- ÉQUIPE DE DIRECTION + SIGNATURES (PAGE RÉCAP) -->
+  <!-- ÉQUIPE DE DIRECTION (SANS COACH) SUR LA PAGE RÉCAP -->
   <div class="section-title">قيادة الدراسة</div>
   <table class="signatures-table">
     <tbody>
       <% (team || []).forEach(function(m) { %>
+        <% if (m.role === 'coach') { return; } %>
         <tr>
           <td>
             <div><strong><%= m.roleLabel %></strong></div>
@@ -254,11 +298,12 @@
       ( <%= t.pct.toFixed(1) %>% ) – القرار : <%= t.decisionLabel %>
     </div>
 
-    <!-- ÉQUIPE DE DIRECTION + SIGNATURES (RAPPEL SUR CHAQUE PAGE) -->
+    <!-- ÉQUIPE DE دِراسة (SANS COACH) SUR CHAQUE PAGE -->
     <div class="section-title">قيادة الدراسة</div>
     <table class="signatures-table">
       <tbody>
         <% (team || []).forEach(function(m) { %>
+          <% if (m.role === 'coach') { return; } %>
           <tr>
             <td>
               <div><strong><%= m.roleLabel %></strong></div>
@@ -280,6 +325,128 @@
     </table>
 
   <% }) %> <!-- fin boucle trainees -->
+
+  <!-- 🔹 PAGE RAPPORT DIRECTEUR -->
+  <% if (directorReport) { %>
+    <div class="page-break"></div>
+
+    <div class="section-title">تقرير قائد الدراسة</div>
+
+    <div class="report-block-title">1. ملاحظات حول المتدربين</div>
+    <div class="report-block-text">
+      <%= directorReport.block1 || '' %>
+    </div>
+
+    <div class="report-block-title">2. ملاحظات حول قيادة الدراسة</div>
+    <div class="report-block-text">
+      <%= directorReport.block2 || '' %>
+    </div>
+
+    <div class="report-block-title">3. ملاحظات عامة وتوصيات</div>
+    <div class="report-block-text">
+      <%= directorReport.block3 || '' %>
+    </div>
+
+    <table class="signatures-table report-signature">
+      <tbody>
+        <tr>
+          <td>
+            <div><strong>قائد الدراسة</strong></div>
+            <div>
+              <%= (directorReport.prenom || '') + ' ' + (directorReport.nom || '') %>
+            </div>
+          </td>
+          <td>
+            <% if (directorReport.signedAt) { %>
+              <div>
+                تاريخ الإمضاء :
+                <%= new Date(directorReport.signedAt).toLocaleDateString('ar-TN', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit'
+                }) %>
+              </div>
+            <% } else if (directorReport.updatedAt) { %>
+              <div>
+                آخر تحديث :
+                <%= new Date(directorReport.updatedAt).toLocaleDateString('ar-TN', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit'
+                }) %>
+              </div>
+            <% } %>
+          </td>
+          <td>
+            <% if (directorReport.signatureDataUrl) { %>
+              <div><img src="<%= directorReport.signatureDataUrl %>" /></div>
+            <% } %>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  <% } %>
+
+  <!-- 🔹 PAGE RAPPORT COACH -->
+  <% if (coachReport) { %>
+    <div class="page-break"></div>
+
+    <div class="section-title">تقرير المرشد الفني</div>
+
+    <div class="report-block-title">1. ملاحظات حول قائد الدراسة</div>
+    <div class="report-block-text">
+      <%= coachReport.block1 || '' %>
+    </div>
+
+    <div class="report-block-title">2. ملاحظات حول قيادة الدراسة</div>
+    <div class="report-block-text">
+      <%= coachReport.block2 || '' %>
+    </div>
+
+    <div class="report-block-title">3. ملاحظات عامة وتوصيات</div>
+    <div class="report-block-text">
+      <%= coachReport.block3 || '' %>
+    </div>
+
+    <table class="signatures-table report-signature">
+      <tbody>
+        <tr>
+          <td>
+            <div><strong>المرشد الفني</strong></div>
+            <div>
+              <%= (coachReport.prenom || '') + ' ' + (coachReport.nom || '') %>
+            </div>
+          </td>
+          <td>
+            <% if (coachReport.signedAt) { %>
+              <div>
+                تاريخ الإمضاء :
+                <%= new Date(coachReport.signedAt).toLocaleDateString('ar-TN', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit'
+                }) %>
+              </div>
+            <% } else if (coachReport.updatedAt) { %>
+              <div>
+                آخر تحديث :
+                <%= new Date(coachReport.updatedAt).toLocaleDateString('ar-TN', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit'
+                }) %>
+              </div>
+            <% } %>
+          </td>
+          <td>
+            <% if (coachReport.signatureDataUrl) { %>
+              <div><img src="<%= coachReport.signatureDataUrl %>" /></div>
+            <% } %>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  <% } %>
 
 </body>
 </html>

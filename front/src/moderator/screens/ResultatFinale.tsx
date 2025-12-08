@@ -19,7 +19,7 @@ type EvaluationItem = {
 
 type EvaluationApproval = {
   user: string;
-  role: 'director' | 'trainer';
+  role: 'director' | 'trainer' | 'assistant' | 'coach';
   approvedAt: string;
   signatureUrl?: string;
 };
@@ -58,7 +58,7 @@ type FinalDecisionFromApi = {
     userId: string;
     prenom?: string;
     nom?: string;
-    role: 'director' | 'trainer';
+    role: 'director' | 'trainer' | 'assistant' | 'coach';
     approvedAt?: string | null;
     signatureUrl?: string;
   }[];
@@ -68,10 +68,17 @@ type TeamMember = {
   userId: string;
   prenom: string;
   nom: string;
-  role: 'director' | 'trainer';
+  role: 'director' | 'trainer' | 'assistant' | 'coach';
   hasApproved: boolean;
   lastApprovedAt?: string | null;
   signatureUrl?: string;
+};
+
+type StaffMember = {
+  userId: string;
+  prenom: string;
+  nom: string;
+  role: 'director' | 'trainer' | 'assistant' | 'coach';
 };
 
 type FormationHeader = {
@@ -105,14 +112,17 @@ function mapApiDecisionToUi(d?: FinalDecisionApi | null): FinalDecisionUI | unde
 }
 
 function labelForDecisionUI(d: FinalDecisionUI): string {
-  if (d === 'pass') return 'يجاز';
+  if (d === 'pass') return 'يؤهل';
   if (d === 'repeat') return 'يعيد الدورة';
-  return 'لا يصلح للدور';
+  return 'لا يناسب الدور';
 }
 
-function labelForRole(role: 'director' | 'trainer'): string {
+function labelForRole(role: 'director' | 'trainer' | 'assistant' | 'coach'): string {
   if (role === 'director') return 'قائد الدراسة';
-  return 'مساعد قائد الدراسة';
+  if (role === 'trainer') return 'مساعد قائد الدراسة';
+  if (role === 'assistant') return 'مساعد قائد الدراسة';
+  if (role === 'coach') return 'المرشد الفني';
+  return role;
 }
 
 function formatApprovalSentence(iso?: string | null): string {
@@ -151,8 +161,10 @@ export default function ModeratorFinalResults(): React.JSX.Element {
   const [decisionsByTrainee, setDecisionsByTrainee] = React.useState<
     Record<string, FinalDecisionUI | undefined>
   >({});
-  const [team, setTeam] = React.useState<TeamMember[]>([]);
   const [globalValidationDate, setGlobalValidationDate] = React.useState<string | null>(null);
+
+  // Staff complet depuis affectations (director / trainer / assistant / coach)
+  const [staff, setStaff] = React.useState<StaffMember[]>([]);
 
   const [pdfLoading, setPdfLoading] = React.useState(false);
   const [pdfErr, setPdfErr] = React.useState<string | null>(null);
@@ -189,7 +201,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             });
           }
         } catch {
-          // on ignore les erreurs de méta pour ne pas tout casser
+          // ignore meta errors
         }
 
         // 2) Trainees + évaluations
@@ -228,7 +240,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
 
         setTrainees(list);
 
-        // 3) Décisions finales + équipe direction
+        // 3) Décisions finales + équipe direction (pour status + dates)
         const rDec = await fetch(
           `${API_BASE}/final-decisions/formations/${formationId}?ts=${Date.now()}`,
           {
@@ -246,7 +258,6 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             byTrainee[fd.traineeId] = mapApiDecisionToUi(fd.decision || undefined);
           });
           setDecisionsByTrainee(byTrainee);
-          setTeam(teamArr);
 
           // date globale = max(lastApprovedAt)
           const dates: Date[] = [];
@@ -260,6 +271,34 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             const maxD = new Date(Math.max(...dates.map(d => d.getTime())));
             setGlobalValidationDate(maxD.toISOString());
           }
+        }
+
+        // 4) Staff complet depuis affectations (director / trainer / assistant / coach)
+        try {
+          const rA = await fetch(
+            `${API_BASE}/affectations/formations/${formationId}/affectations?ts=${Date.now()}`,
+            {
+              headers: headers(),
+              cache: 'no-store',
+            }
+          );
+          if (rA.ok) {
+            const dataA = await rA.json();
+            const arr: any[] = Array.isArray(dataA) ? dataA : dataA.affectations || [];
+
+            const staffList: StaffMember[] = arr
+              .filter(a => a.role && a.role !== 'trainee' && a.user)
+              .map(a => ({
+                userId: String(a.user._id),
+                prenom: String(a.user.prenom || ''),
+                nom: String(a.user.nom || ''),
+                role: a.role as StaffMember['role'],
+              }));
+
+            setStaff(staffList);
+          }
+        } catch {
+          // on ignore l'erreur de staff, ce n'est pas bloquant
         }
       } catch (e: any) {
         setErr(e?.message || 'تعذّر تحميل النتائج النهائية');
@@ -330,8 +369,25 @@ export default function ModeratorFinalResults(): React.JSX.Element {
     }
   }
 
+  function handleDirectorReport() {
+    if (!formationId) return;
+    nav('/moderator/rapportdirecteur', { state: { formationId } });
+  }
+
+  function handleCoachReport() {
+    if (!formationId) return;
+    nav('/moderator/rapportcoach', { state: { formationId } });
+  }
+
+  // Split staff
+  const directionStaff = staff.filter(s => s.role !== 'coach');
+  const coachStaff = staff.filter(s => s.role === 'coach');
+
   return (
-    <div dir="rtl" style={{ width: '80vw', marginInline: 'auto', paddingInline: 24, marginTop: 20 }}>
+    <div
+      dir="rtl"
+      style={{ width: '80vw', marginInline: 'auto', paddingInline: 24, marginTop: 20 }}
+    >
       {/* Toolbar + entête */}
       <div style={styles.toolbar}>
         <button
@@ -355,7 +411,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
           )}
         </div>
 
-        {/* Logo (public/fonts/logo.png) */}
+        {/* (logo si besoin) */}
       </div>
 
       <div style={styles.redLine} />
@@ -401,7 +457,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
                         style={styles.detailsBtn}
                         onClick={() =>
                           nav('/moderator/detailresults', {
-                            state: { formationId, traineeId: t._id,decision: decision,},
+                            state: { formationId, traineeId: t._id, decision: decision },
                           })
                         }
                       >
@@ -413,7 +469,14 @@ export default function ModeratorFinalResults(): React.JSX.Element {
 
                 {rowsWithTotals.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: '#9ca3af' }}>
+                    <td
+                      colSpan={8}
+                      style={{
+                        ...styles.td,
+                        textAlign: 'center',
+                        color: '#9ca3af',
+                      }}
+                    >
                       لا توجد نتائج نهائية متاحة.
                     </td>
                   </tr>
@@ -424,10 +487,10 @@ export default function ModeratorFinalResults(): React.JSX.Element {
 
           {/* Statistiques globales */}
           <div style={styles.statsRow}>
-            <div>عدد المتدربين  : {totalPresent}</div>
-            <div>عدد الناجحين : {successCount}</div>
-            <div>عدد المعيدين : {retakeCount}</div>
-            <div>عدد غير المؤهلين : {incompatibleCount}</div>
+            <div>عدد المتدربين : {totalPresent}</div>
+            <div> يؤهل : {successCount}</div>
+            <div> يعيد الدورة : {retakeCount}</div>
+            <div> لا يناسب الدور : {incompatibleCount}</div>
             <div>نسبة النجاح : {successPct.toFixed(1)}%</div>
           </div>
 
@@ -436,41 +499,49 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             <div style={styles.validationRow}>{formattedValidationDate}</div>
           )}
 
-          {/* Équipe de direction + signatures */}
-          {team.length > 0 && (
+          {/* Staff : séparation قيادة الدراسة / المرشد الفني */}
+          {(directionStaff.length > 0 || coachStaff.length > 0) && (
             <div style={styles.teamBlock}>
-              <div style={styles.teamTitle}>قيادة الدراسة</div>
-              <div style={styles.teamList}>
-                {team.map(member => {
-                  formatApprovalSentence(member.lastApprovedAt);
-                  return (
-                    <div key={member.userId} style={styles.teamItem}>
-                      {member.signatureUrl && (
-                        <img
-                          src={member.signatureUrl}
-                          alt="signature"
-                          style={{
-                            height: 36,
-                            maxWidth: 120,
-                            objectFit: 'contain',
-                            marginInlineStart: 8,
-                          }}
-                        />
-                      )}
-                      <div>
+              {directionStaff.length > 0 && (
+                <>
+                  <div style={styles.teamTitle}>قيادة الدراسة</div>
+                  <div style={styles.teamList}>
+                    {directionStaff.map(member => (
+                      <div key={member.userId} style={styles.teamItem}>
                         <div>
                           {labelForRole(member.role)} – {member.prenom} {member.nom}
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {coachStaff.length > 0 && (
+                <>
+                  <div style={{ ...styles.teamTitle, marginTop: 10 }}>المرشد الفني</div>
+                  <div style={styles.teamList}>
+                    {coachStaff.map(member => (
+                      <div key={member.userId} style={styles.teamItem}>
+                        <div>
+                          {labelForRole(member.role)} – {member.prenom} {member.nom}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* Bouton PDF */}
-          <div style={{ marginTop: 18, display: 'flex', justifyContent: 'center' }}>
+          {/* Boutons en bas à gauche */}
+          <div style={styles.actionsRow}>
+            <button style={styles.reportBtn} onClick={handleDirectorReport}>
+              تقرير قائد الدراسة
+            </button>
+            <button style={styles.reportBtn} onClick={handleCoachReport}>
+              تقرير المرشد الفني
+            </button>
             <button
               style={styles.downloadBtn}
               onClick={handleDownloadPdf}
@@ -479,8 +550,16 @@ export default function ModeratorFinalResults(): React.JSX.Element {
               {pdfLoading ? '… جارٍ توليد بطاقة النتائج' : 'تحميل بطاقة النتائج'}
             </button>
           </div>
+
           {pdfErr && (
-            <div style={{ marginTop: 6, textAlign: 'center', color: '#b91c1c', fontSize: 12 }}>
+            <div
+              style={{
+                marginTop: 6,
+                textAlign: 'left',
+                color: '#b91c1c',
+                fontSize: 12,
+              }}
+            >
               ❌ {pdfErr}
             </div>
           )}
@@ -576,6 +655,24 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#f9fafb',
     padding: '6px 8px',
     borderRadius: 999,
+  },
+
+  actionsRow: {
+    marginTop: 18,
+    display: 'flex',
+    gap: 10,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+  },
+
+  reportBtn: {
+    fontSize: 12,
+    padding: '4px 12px',
+    borderRadius: 999,
+    border: `1px solid ${RED}`,
+    background: '#fff',
+    color: RED,
+    cursor: 'pointer',
   },
 
   downloadBtn: {

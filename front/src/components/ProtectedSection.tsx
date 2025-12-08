@@ -2,7 +2,12 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/UseAuth';
-import { canAccessDirectorSpace } from '../utils/role'; // adapte le chemin si besoin
+import {
+  canAccessDirectorSpace,
+  isSessionDirector,
+  isSessionCoach,
+  canAccessTeamSpace,
+} from '../utils/role';  // adapte le chemin si besoin
 
 const NATIONAL = 'وطني';
 
@@ -10,7 +15,10 @@ type Section =
   | 'admin'
   | 'moderator_national'
   | 'moderator_regional'
-  | 'director_space';
+  | 'director_space'
+  | 'direction_space'
+  | 'team_space'
+  | 'coach_space';
 
 export default function ProtectedSection({
   section,
@@ -43,10 +51,21 @@ export default function ProtectedSection({
     canAccess = role === 'admin' || (role === 'moderator' && region === NATIONAL);
   } else if (section === 'moderator_regional') {
     canAccess = role === 'admin' || (role === 'moderator' && region !== NATIONAL);
-  } else if (section === 'director_space') {
+  } else if (section === 'team_space') {
     // 👉 Ici on délègue à ton helper qui gère déjà director + trainer (+ admin si tu l’as mis dedans)
     canAccess = canAccessDirectorSpace(user);
   }
-
+  else if (section === 'director_space') {
+    // 👉 Ici on délègue à ton helper qui gère déjà director + trainer (+ admin si tu l’as mis dedans)
+    canAccess = isSessionDirector(user);
+  }
+  else if (section === 'coach_space') {
+    // 👉 Ici on délègue à ton helper qui gère déjà director + trainer (+ admin si tu l’as mis dedans)
+    canAccess = isSessionCoach(user);
+  }
+  else if (section === 'direction_space') {
+    // 👉 Ici on délègue à ton helper qui gère déjà director + trainer (+ admin si tu l’as mis dedans)
+    canAccess = canAccessTeamSpace(user);
+  }
   return canAccess ? <>{children}</> : <Navigate to="/acceuil" replace />;
 }

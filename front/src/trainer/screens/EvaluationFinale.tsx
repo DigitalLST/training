@@ -16,7 +16,7 @@ type CertifLite = {
 type FormationLite = {
   formationId: string;
   nom: string;
-  myRole: string; // 'director' | 'trainer'
+  myRole: 'director' | 'trainer' | 'assistant'; // 🔁 on précise les rôles possibles
   sessionTitle?: string;
   startDate?: string;
   endDate?: string;
@@ -86,7 +86,7 @@ type FinalDecisionApproval = {
   userId: string;
   prenom?: string;
   nom?: string;
-  role: 'director' | 'trainer';
+  role: 'director' | 'trainer' | 'assistant'; // 🔁 on prévoit aussi assistant
   approvedAt?: string | null;
   signatureUrl?: string;
 };
@@ -98,12 +98,12 @@ type FinalDecisionFromApi = {
   approvals: FinalDecisionApproval[];
 };
 
-/** Membre de l’équipe director/trainer pour une formation */
+/** Membre de l’équipe pour une formation */
 type TeamMember = {
   userId: string;
   prenom: string;
   nom: string;
-  role: 'director' | 'trainer';
+  role: 'director' | 'trainer' | 'assistant';
   hasApproved: boolean;
   lastApprovedAt?: string | null;
   signatureUrl?: string;
@@ -134,9 +134,10 @@ function fmtRange(s?: string, e?: string) {
   return `إلى ${F(ed!)}`;
 }
 
-function labelForRole(role: 'director' | 'trainer'): string {
+function labelForRole(role: 'director' | 'trainer' | 'assistant'): string {
   if (role === 'director') return 'قائد الدراسة';
-  return 'مساعد قائد الدراسة';
+  if (role === 'trainer') return 'مساعد قائد الدراسة';
+  return 'قيادة الدراسة – حامل شارة';
 }
 
 function mapUiDecisionToApi(d: FinalDecisionUI): FinalDecisionApi {
@@ -154,9 +155,9 @@ function mapApiDecisionToUi(d?: FinalDecisionApi | null): FinalDecisionUI | unde
 }
 
 function labelForDecisionUI(d: FinalDecisionUI): string {
-  if (d === 'pass') return 'يجاز';
+  if (d === 'pass') return 'يؤهل';
   if (d === 'repeat') return 'يعيد الدورة';
-  return 'لا يصلح للدور';
+  return 'لا يناسب الدور';
 }
 
 function formatApprovalSentence(iso?: string | null): string {
@@ -199,11 +200,8 @@ export default function EvaluationFinale(): React.JSX.Element {
     Record<string, string | null>
   >({});
 
-  /** équipe director/trainer par formation */
+  /** équipe par formation */
   const [teamByFormation, setTeamByFormation] = React.useState<Record<string, TeamMember[]>>({});
-  const [allTeamApprovedByFormation, setAllTeamApprovedByFormation] = React.useState<
-    Record<string, boolean>
-  >({});
   const [currentUserHasApprovedByFormation, setCurrentUserHasApprovedByFormation] =
     React.useState<Record<string, boolean>>({});
 
@@ -269,7 +267,7 @@ export default function EvaluationFinale(): React.JSX.Element {
 
       setTrainees(prev => ({ ...prev, [fid]: onlyTrainees }));
 
-      // Load final decisions + info équipe direction
+      // Load final decisions + info équipe
       const rDec = await fetch(`${API_BASE}/final-decisions/formations/${fid}`, {
         headers: headers(),
         cache: 'no-store',
@@ -279,7 +277,6 @@ export default function EvaluationFinale(): React.JSX.Element {
         const dataDec = await rDec.json();
         const decs = (dataDec.decisions || []) as FinalDecisionFromApi[];
         const team = (dataDec.team || []) as TeamMember[];
-        const allTeamApproved = !!dataDec.allTeamApproved;
         const currentUserHasApproved = !!dataDec.currentUserHasApproved;
 
         setDecisions(prev => {
@@ -294,11 +291,6 @@ export default function EvaluationFinale(): React.JSX.Element {
         setTeamByFormation(prev => ({
           ...prev,
           [fid]: team,
-        }));
-
-        setAllTeamApprovedByFormation(prev => ({
-          ...prev,
-          [fid]: allTeamApproved,
         }));
 
         setCurrentUserHasApprovedByFormation(prev => ({
@@ -370,7 +362,6 @@ export default function EvaluationFinale(): React.JSX.Element {
 
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
-      // recharge pour mettre à jour approvals director + état équipe
       await loadTraineesForFormation(fid);
     } catch (e: any) {
       setSaveErrByFormation(prev => ({
@@ -400,11 +391,6 @@ export default function EvaluationFinale(): React.JSX.Element {
     await loadTraineesForFormation(fid);
   }
 
-  /** 
-   * Vérifie si l’utilisateur a déjà une signature :
-   *  - si oui → exécute directement l’action (directorSave / trainerApprove)
-   *  - sinon → ouvre le modal de signature et garde l’action en pending
-   */
   async function startApprovalWithSignature(kind: PendingAction['kind'], formationId: string) {
     try {
       setSignatureErr(null);
@@ -418,7 +404,6 @@ export default function EvaluationFinale(): React.JSX.Element {
         const hasSignature = !!data?.hasSignature;
 
         if (hasSignature) {
-          // On exécute directement l’action
           if (kind === 'directorSave') {
             await handleSaveDecisions(formationId);
           } else {
@@ -428,20 +413,13 @@ export default function EvaluationFinale(): React.JSX.Element {
         }
       }
     } catch (e: any) {
-      // En cas d’erreur on laisse quand même l’utilisateur créer sa signature
       setSignatureErr(e?.message || 'تعذّر التحقق من وجود الإمضاء.');
     }
 
-    // Pas de signature → on ouvre le modal et on se souvient de l’action
     setPendingAction({ kind, formationId });
     setSignatureModalOpen(true);
   }
 
-  /** 
-   * Quand l’utilisateur sauvegarde sa signature depuis le modal :
-   *  - on l’envoie au backend
-   *  - puis on exécute l’action en attente (director / trainer)
-   */
   async function handleSignatureSave(dataUrl: string) {
     if (!pendingAction) {
       setSignatureModalOpen(false);
@@ -459,7 +437,6 @@ export default function EvaluationFinale(): React.JSX.Element {
 
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
-      // une fois l’imprimé enregistré → on joue l’action
       if (pendingAction.kind === 'directorSave') {
         await handleSaveDecisions(pendingAction.formationId);
       } else {
@@ -506,7 +483,10 @@ export default function EvaluationFinale(): React.JSX.Element {
           const isLoadingT = loadingTrainees[fid];
           const errT = errTrainees[fid];
 
-          const isDirector = (f.myRole || '').toLowerCase() === 'director';
+          const myRole = (f.myRole || '').toLowerCase() as 'director' | 'trainer' | 'assistant';
+          const isDirector = myRole === 'director';
+          const isTrainer = myRole === 'trainer';
+          const isAssistant = myRole === 'assistant';
 
           const present = list.filter(t => t.isPresent);
           const valid = present.filter(t => t.evaluation?.status === 'validated');
@@ -516,6 +496,7 @@ export default function EvaluationFinale(): React.JSX.Element {
           const sorted = valid
             .map(t => ({ trainee: t, totals: computeTotals(t.evaluation) }))
             .sort((a, b) => b.totals.totalNote - a.totals.totalNote);
+
           const page = pageByFormation[fid] || 1;
           const start = (page - 1) * PAGE_SIZE;
           const pageItems = sorted.slice(start, start + PAGE_SIZE);
@@ -528,14 +509,24 @@ export default function EvaluationFinale(): React.JSX.Element {
           const saveErr = saveErrByFormation[fid] || null;
 
           const team = teamByFormation[fid] || [];
-          const approvers = team.filter(m => m.hasApproved);
-          const allTeamApproved = allTeamApprovedByFormation[fid] || false;
+
+          // 🔢 nouveaux calculs : uniquement sur les trainers
+          const trainers = team.filter(m => m.role === 'trainer');
+          const trainersApproved = trainers.filter(m => m.hasApproved);
+          const trainersCount = trainers.length;
+          const trainersApprovedCount = trainersApproved.length;
+          const allTrainersApproved =
+            trainersCount > 0 && trainersApprovedCount === trainersCount;
           const currentUserHasApproved = currentUserHasApprovedByFormation[fid] || false;
 
-          // Chaque trainer : bouton désactivé seulement s'il a déjà validé ou si tout le monde a validé
-          const trainerButtonDisabled = currentUserHasApproved || allTeamApproved;
-          // Director : désactivé seulement quand toute l’équipe a validé
-          const directorButtonDisabled = allTeamApproved;
+          const trainerButtonDisabled =
+            !isTrainer || currentUserHasApproved || allTrainersApproved;
+          const directorButtonDisabled = allTrainersApproved; // une fois tous les trainers OK, on fige
+
+          const approvers = team.filter(m => m.hasApproved);
+
+          const totalPages =
+            sorted.length === 0 ? 1 : Math.ceil(sorted.length / PAGE_SIZE);
 
           return (
             <div key={fid} style={styles.card}>
@@ -568,171 +559,260 @@ export default function EvaluationFinale(): React.JSX.Element {
                     </div>
                   )}
 
-                  {!isLoadingT && !errT && allValidated && (
-                    <>
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={styles.table}>
-                          <thead>
-                            <tr>
-                              <th style={styles.th}>المعرف الكشفي</th>
-                              <th style={styles.th}>الاسم و اللقب</th>
-                              <th style={styles.th}>الجهة</th>
-                              <th style={styles.th}>البريد الإلكتروني</th>
-                              <th style={styles.th}>العلامة</th>
-                              <th style={styles.th}>النسبة %</th>
-                              <th style={styles.th}>القرار النهائي</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {pageItems.map(({ trainee: t, totals }) => {
-                              const d = decisions[decisionKey(fid, t._id)];
+                  {/* Assistant : voit le tableau seulement quand tous les trainers ont validé */}
+                  {!isLoadingT &&
+                    !errT &&
+                    allValidated &&
+                    isAssistant &&
+                    !allTrainersApproved && (
+                      <div style={{ color: '#9ca3af' }}>
+                        النتائج النهائية قيد المصادقة من طرف المدربين. يمكنك الإطلاع عليها بعد
+                        اكتمال جميع المصادقات.
+                      </div>
+                    )}
+
+                  {!isLoadingT &&
+                    !errT &&
+                    allValidated &&
+                    (!isAssistant || allTrainersApproved) && (
+                      <>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={styles.table}>
+                            <thead>
+                              <tr>
+                                <th style={styles.th}>المعرف الكشفي</th>
+                                <th style={styles.th}>الاسم و اللقب</th>
+                                <th style={styles.th}>الجهة</th>
+                                <th style={styles.th}>البريد الإلكتروني</th>
+                                <th style={styles.th}>العلامة</th>
+                                <th style={styles.th}>النسبة %</th>
+                                <th style={styles.th}>القرار النهائي</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pageItems.map(({ trainee: t, totals }) => {
+                                const d = decisions[decisionKey(fid, t._id)];
+
+                                return (
+                                  <tr key={t._id}>
+                                    <td style={styles.td}>{t.idScout || '—'}</td>
+                                    <td style={styles.td}>
+                                      {t.prenom} {t.nom}
+                                    </td>
+                                    <td style={styles.td}>{t.region || '—'}</td>
+                                    <td style={styles.td}>{t.email || '—'}</td>
+                                    <td style={styles.td}>
+                                      {totals.totalNote}/{totals.totalMax}
+                                    </td>
+                                    <td style={styles.td}>{totals.pct.toFixed(1)}%</td>
+                                    <td style={styles.td}>
+                                      {isDirector ? (
+                                        <select
+                                          style={styles.select}
+                                          value={d || ''}
+                                          onChange={e =>
+                                            handleDecisionChange(fid, t._id, e.target.value)
+                                          }
+                                          disabled={directorButtonDisabled}
+                                        >
+                                          <option value="">في الانتظار</option>
+                                          <option value="pass">يجاز</option>
+                                          <option value="repeat">يعيد الدورة</option>
+                                          <option value="not_suitable">لا يصلح للدور</option>
+                                        </select>
+                                      ) : (
+                                        <span
+                                          style={{
+                                            color: d ? '#111' : '#999',
+                                            fontSize: 12,
+                                          }}
+                                        >
+                                          {d
+                                            ? labelForDecisionUI(d)
+                                            : 'في انتظار قرار قائد الدراسة'}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {totalPages > 1 && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              display: 'flex',
+                              justifyContent: 'center',
+                              gap: 8,
+                              fontSize: 12,
+                              color: '#4b5563',
+                            }}
+                          >
+                            <button
+                              style={styles.pageBtn}
+                              disabled={page <= 1}
+                              onClick={() =>
+                                setPageByFormation(prev => ({
+                                  ...prev,
+                                  [fid]: Math.max(1, page - 1),
+                                }))
+                              }
+                            >
+                              السابق
+                            </button>
+                            <span>
+                              صفحة {page} / {totalPages}
+                            </span>
+                            <button
+                              style={styles.pageBtn}
+                              disabled={page >= totalPages}
+                              onClick={() =>
+                                setPageByFormation(prev => ({
+                                  ...prev,
+                                  [fid]: Math.min(totalPages, page + 1),
+                                }))
+                              }
+                            >
+                              التالي
+                            </button>
+                          </div>
+                        )}
+
+                        {saveErr && <div style={{ color: '#b91c1c' }}>❌ {saveErr}</div>}
+
+                        {/* Director : enregistre les décisions, mais ne valide pas les résultats */}
+                        {isDirector && allHaveDecision && (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                              style={{
+                                borderRadius: 999,
+                                padding: '6px 18px',
+                                border: 'none',
+                                background:
+                                  !isSaving && !directorButtonDisabled ? RED : '#ccc',
+                                color: '#fff',
+                                cursor:
+                                  isSaving || directorButtonDisabled
+                                    ? 'default'
+                                    : 'pointer',
+                              }}
+                              disabled={isSaving || directorButtonDisabled}
+                              onClick={() =>
+                                startApprovalWithSignature('directorSave', fid)
+                              }
+                            >
+                              {isSaving ? '… جاري الحفظ' : 'حفظ القرارات النهائية'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Validation finale : Trainers uniquement */}
+                        {isTrainer && allHaveDecision && !allTrainersApproved && (
+                          <div
+                            style={{
+                              marginTop: 12,
+                              display: 'flex',
+                              justifyContent: 'flex-end',
+                            }}
+                          >
+                            <button
+                              style={{
+                                borderRadius: 999,
+                                border: 'none',
+                                padding: '6px 18px',
+                                background: trainerButtonDisabled ? '#ccc' : RED,
+                                color: '#fff',
+                                fontSize: 13,
+                                cursor: trainerButtonDisabled ? 'default' : 'pointer',
+                              }}
+                              disabled={trainerButtonDisabled}
+                              onClick={() =>
+                                startApprovalWithSignature('trainerApprove', fid)
+                              }
+                            >
+                              المصادقة على النتائج النهائية
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Info sur le nombre de trainers ayant validé */}
+                        {trainersCount > 0 && (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              fontSize: 12,
+                              color: '#6b7280',
+                              textAlign: 'left',
+                            }}
+                          >
+                            عدد المدربين الذين صادقوا: {trainersApprovedCount} /{' '}
+                            {trainersCount}
+                          </div>
+                        )}
+
+                        {/* Pastilles des approbateurs (director + trainers + assistants si tu veux) */}
+                        {approvers.length > 0 && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 12,
+                              color: '#4b5563',
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: 8,
+                              justifyContent: 'flex-end',
+                            }}
+                          >
+                            {approvers.map(ap => {
+                              const labelRole = labelForRole(ap.role);
+                              const sentence = formatApprovalSentence(ap.lastApprovedAt);
 
                               return (
-                                <tr key={t._id}>
-                                  <td style={styles.td}>{t.idScout || '—'}</td>
-                                  <td style={styles.td}>
-                                    {t.prenom} {t.nom}
-                                  </td>
-                                  <td style={styles.td}>{t.region || '—'}</td>
-                                  <td style={styles.td}>{t.email || '—'}</td>
-                                  <td style={styles.td}>
-                                    {totals.totalNote}/{totals.totalMax}
-                                  </td>
-                                  <td style={styles.td}>{totals.pct.toFixed(1)}%</td>
-                                  <td style={styles.td}>
-                                    {isDirector ? (
-                                      <select
-                                        style={styles.select}
-                                        value={d || ''}
-                                        onChange={e =>
-                                          handleDecisionChange(fid, t._id, e.target.value)
-                                        }
-                                        disabled={directorButtonDisabled}
-                                      >
-                                        <option value="">في الانتظار</option>
-                                        <option value="pass">يجاز</option>
-                                        <option value="repeat">يعيد الدورة</option>
-                                        <option value="not_suitable">لا يصلح للدور</option>
-                                      </select>
-                                    ) : (
+                                <span
+                                  key={ap.userId}
+                                  style={{
+                                    background: '#f3f4f6',
+                                    borderRadius: 999,
+                                    padding: '3px 10px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                  }}
+                                >
+                                  {ap.signatureUrl && (
+                                    <img
+                                      src={ap.signatureUrl}
+                                      alt="signature"
+                                      style={{
+                                        height: 24,
+                                        maxWidth: 80,
+                                        objectFit: 'contain',
+                                      }}
+                                    />
+                                  )}
+                                  <span>
+                                    {labelRole} – {ap.prenom} {ap.nom}
+                                    {sentence && (
                                       <span
-                                        style={{ color: d ? '#111' : '#999', fontSize: 12 }}
+                                        style={{
+                                          color: '#6b7280',
+                                          marginInlineStart: 4,
+                                        }}
                                       >
-                                        {d
-                                          ? labelForDecisionUI(d)
-                                          : 'في انتظار قرار قائد الدراسة'}
+                                        ({sentence})
                                       </span>
                                     )}
-                                  </td>
-                                </tr>
+                                  </span>
+                                </span>
                               );
                             })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {saveErr && <div style={{ color: '#b91c1c' }}>❌ {saveErr}</div>}
-
-                      {/* Bouton director : enregistrement des décisions */}
-                      {isDirector && allHaveDecision && (
-                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          <button
-                            style={{
-                              borderRadius: 999,
-                              padding: '6px 18px',
-                              border: 'none',
-                              background: !isSaving && !directorButtonDisabled ? RED : '#ccc',
-                              color: '#fff',
-                              cursor:
-                                isSaving || directorButtonDisabled ? 'default' : 'pointer',
-                            }}
-                            disabled={isSaving || directorButtonDisabled}
-                            onClick={() => startApprovalWithSignature('directorSave', fid)}
-                          >
-                            {isSaving ? '… جاري الحفظ' : 'حفظ القرارات النهائية'}
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Bouton d’approbation équipe direction → Trainer uniquement */}
-                      {!isDirector && allHaveDecision && !allTeamApproved && (
-                        <div
-                          style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}
-                        >
-                          <button
-                            style={{
-                              borderRadius: 999,
-                              border: 'none',
-                              padding: '6px 18px',
-                              background: trainerButtonDisabled ? '#ccc' : RED,
-                              color: '#fff',
-                              fontSize: 13,
-                              cursor: trainerButtonDisabled ? 'default' : 'pointer',
-                            }}
-                            disabled={trainerButtonDisabled}
-                            onClick={() => startApprovalWithSignature('trainerApprove', fid)}
-                          >
-                            المصادقة على النتائج النهائية
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Pastilles des approbateurs (director + trainers) */}
-                      {approvers.length > 0 && (
-                        <div
-                          style={{
-                            marginTop: 8,
-                            fontSize: 12,
-                            color: '#4b5563',
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            gap: 8,
-                            justifyContent: 'flex-end',
-                          }}
-                        >
-                          {approvers.map(ap => {
-                            const labelRole = labelForRole(ap.role);
-                            const sentence = formatApprovalSentence(ap.lastApprovedAt);
-
-                            return (
-                              <span
-                                key={ap.userId}
-                                style={{
-                                  background: '#f3f4f6',
-                                  borderRadius: 999,
-                                  padding: '3px 10px',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 6,
-                                }}
-                              >
-                                {/* Signature affichée à côté du nom si dispo */}
-                                {ap.signatureUrl && (
-                                  <img
-                                    src={ap.signatureUrl}
-                                    alt="signature"
-                                    style={{
-                                      height: 24,
-                                      maxWidth: 80,
-                                      objectFit: 'contain',
-                                    }}
-                                  />
-                                )}
-                                <span>
-                                  {labelRole} – {ap.prenom} {ap.nom}
-                                  {sentence && (
-                                    <span style={{ color: '#6b7280', marginInlineStart: 4 }}>
-                                      ({sentence})
-                                    </span>
-                                  )}
-                                </span>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  )}
+                          </div>
+                        )}
+                      </>
+                    )}
                 </div>
               )}
             </div>
@@ -746,7 +826,6 @@ export default function EvaluationFinale(): React.JSX.Element {
         )}
       </div>
 
-      {/* Modal de signature global (réutilisable pour director & trainer) */}
       <SignatureModal
         open={signatureModalOpen}
         onClose={() => {
@@ -852,5 +931,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #d1d5db',
     minWidth: 140,
     fontSize: 12,
+  },
+  pageBtn: {
+    borderRadius: 999,
+    border: '1px solid #e5e7eb',
+    padding: '4px 10px',
+    background: '#f9fafb',
+    cursor: 'pointer',
+    minWidth: 70,
   },
 };

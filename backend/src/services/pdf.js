@@ -1,4 +1,3 @@
-// backend/src/services/pdf.js
 const puppeteer = require('puppeteer');
 const ejs = require('ejs');
 const path = require('path');
@@ -6,10 +5,29 @@ const fs = require('fs');
 
 // petit helper local pour libellé décision
 function labelDecision(decision) {
-  if (decision === 'success') return 'يجاز';
+  if (decision === 'success') return 'يؤهل';
   if (decision === 'retake') return 'يعيد الدورة';
-  if (decision === 'incompatible') return 'لا يصلح للدور';
+  if (decision === 'incompatible') return '  لا يناسب الدور';
   return '—';
+}
+
+// helper pour formater date+heure en arabe
+function formatDateTimeAr(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const dateStr = d.toLocaleDateString('ar-TN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const timeStr = d.toLocaleTimeString('ar-TN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  return { dateStr, timeStr, full: `تم الإمضاء يوم ${dateStr} على الساعة ${timeStr}` };
 }
 
 async function generateFinalResultsPdf(rawData) {
@@ -58,9 +76,19 @@ async function generateFinalResultsPdf(rawData) {
   }
   data.logoDataUrl = logoDataUrl;
 
+  // 🔹 Team : rôle + signature en base64 + assistantName + coachName
+  let assistantName = '';
+  let coachName = '';
+
+  // 🔹 Team : rôle + signature en base64
   // 🔹 Team : rôle + signature en base64
   (data.team || []).forEach(m => {
-    m.roleLabel = m.role === 'director' ? 'قائد الدراسة' : 'مساعد قائد الدراسة';
+    // Libellé du rôle
+    if (m.role === 'director') m.roleLabel = 'قائد الدراسة';
+    else if (m.role === 'trainer') m.roleLabel = 'مساعد قائد الدراسة';
+    else if (m.role === 'assistant') m.roleLabel = 'مساعد قائد الدراسة';
+    else if (m.role === 'coach') m.roleLabel = 'المرشد الفني';
+    else m.roleLabel = m.role || '';
 
     // date d’approbation lisible
     if (m.lastApprovedAt) {
@@ -92,6 +120,29 @@ async function generateFinalResultsPdf(rawData) {
       }
     }
   });
+
+  // 🔹 Réinjecter nom / prénom / signature dans les rapports directorReport & coachReport
+  const directorMember = (data.team || []).find(m => m.role === 'director');
+  const coachMember = (data.team || []).find(m => m.role === 'coach');
+
+  if (data.directorReport && directorMember) {
+    data.directorReport.prenom = data.directorReport.prenom || directorMember.prenom || '';
+    data.directorReport.nom = data.directorReport.nom || directorMember.nom || '';
+    data.directorReport.signatureDataUrl =
+      data.directorReport.signatureDataUrl || directorMember.signatureDataUrl || null;
+  }
+
+  if (data.coachReport && coachMember) {
+    data.coachReport.prenom = data.coachReport.prenom || coachMember.prenom || '';
+    data.coachReport.nom = data.coachReport.nom || coachMember.nom || '';
+    data.coachReport.signatureDataUrl =
+      data.coachReport.signatureDataUrl || coachMember.signatureDataUrl || null;
+  }
+
+
+
+  data.assistantName = assistantName || '';
+  data.coachName = coachName || '';
 
   // 🔹 Trainees : labels + lignes détaillées (groupées par famille)
   (data.trainees || []).forEach(t => {
@@ -133,8 +184,8 @@ async function generateFinalResultsPdf(rawData) {
     });
 
     // Pour le template
-    t.evaluationRows = flatRows;   // si tu veux garder la version “flat”
-    t.evaluationGroups = groups;   // pour le rowspan dans report.ejs
+    t.evaluationRows = flatRows;   // version “flat”
+    t.evaluationGroups = groups;   // version groupée
   });
 
   // 🔹 Phrase de validation globale
@@ -153,6 +204,27 @@ async function generateFinalResultsPdf(rawData) {
   } else {
     data.validationSentence = '';
   }
+
+  // 🔹 Rapports directeur / coach (optionnels, affichés seulement si signedAt)
+  let directorReport = data.directorReport || null;
+  let coachReport = data.coachReport || null;
+
+  if (directorReport) {
+    const fullName = `${directorReport.prenom || ''} ${directorReport.nom || ''}`.trim();
+    directorReport.fullName = fullName || data.directorName || '';
+    const dt = formatDateTimeAr(directorReport.signedAt);
+    directorReport.signedAtText = dt ? dt.full : null;
+  }
+
+  if (coachReport) {
+    const fullName = `${coachReport.prenom || ''} ${coachReport.nom || ''}`.trim();
+    coachReport.fullName = fullName || data.coachName || '';
+    const dt = formatDateTimeAr(coachReport.signedAt);
+    coachReport.signedAtText = dt ? dt.full : null;
+  }
+
+  data.directorReport = directorReport;
+  data.coachReport = coachReport;
 
   // --------- Render HTML ---------
 

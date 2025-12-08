@@ -303,4 +303,247 @@ router.get('/unassigned', async (req, res) => {
   }
 });
 
+
+
+
+
+/* ---------- helpers ---------- */
+
+function bad(req, res) {
+  const e = validationResult(req);
+  if (!e.isEmpty()) {
+    console.error('Validation errors /users:', e.array());
+    res.status(400).json({ errors: e.array() });
+    return true;
+  }
+  return false;
+}
+
+function ensureAdmin(req, res) {
+  const u = req.user;
+  if (!u || u.role !== 'admin') {
+    res.status(403).json({ message: 'Accès réservé aux administrateurs.' });
+    return false;
+  }
+  return true;
+}
+
+/* ---------- GET /users/search ---------- */
+/**
+ * Utilisé pour l’autocomplete (ManageAdmins, etc.)
+ * GET /users/search?q=...
+ */
+router.get(
+  '/search',
+  requireAuth,
+  [query('q').optional().isString()],
+  async (req, res) => {
+    if (bad(req, res)) return;
+    if (!ensureAdmin(req, res)) return;
+
+    const q = (req.query.q || '').toString().trim();
+    if (!q) {
+      return res.json([]);
+    }
+
+    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+    try {
+      const users = await User.find({
+        $or: [
+          { prenom: regex },
+          { nom: regex },
+          { email: regex },
+          { idScout: regex },
+        ],
+      })
+        .select('prenom nom email idScout region niveau branche role adminAccess')
+        .limit(20)
+        .lean();
+
+      const out = users.map(u => ({
+        _id: u._id,
+        prenom: u.prenom || '',
+        nom: u.nom || '',
+        email: u.email || '',
+        idScout: u.idScout || '',
+        region: u.region || '',
+        niveau: u.niveau || '',
+        branche: u.branche || '',
+        role: u.role,
+        adminAccess: u.adminAccess,
+      }));
+
+      return res.json(out);
+    } catch (err) {
+      console.error('GET /users/search ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la recherche d’utilisateurs.' });
+    }
+  }
+);
+
+/* ---------- GET /users ---------- */
+/**
+ * Liste complète des users (pour écran ManageUsers)
+ * Optionnel: GET /users?q=... → filtre côté serveur
+ */
+router.get(
+  '/',
+  requireAuth,
+  [query('q').optional().isString()],
+  async (req, res) => {
+    if (bad(req, res)) return;
+    if (!ensureAdmin(req, res)) return;
+
+    const q = (req.query.q || '').toString().trim();
+    let filter = {};
+
+    if (q) {
+      const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter = {
+        $or: [
+          { prenom: regex },
+          { nom: regex },
+          { email: regex },
+          { idScout: regex },
+          { region: regex },
+          { niveau: regex },
+          { branche: regex },
+        ],
+      };
+    }
+
+    try {
+      const users = await User.find(filter)
+        .select('prenom nom email idScout region niveau branche role adminAccess')
+        .sort({ nom: 1, prenom: 1 })
+        .lean();
+
+      const out = users.map(u => ({
+        _id: u._id,
+        prenom: u.prenom || '',
+        nom: u.nom || '',
+        email: u.email || '',
+        idScout: u.idScout || '',
+        region: u.region || '',
+        niveau: u.niveau || '',
+        branche: u.branche || '',
+        role: u.role,
+        adminAccess: u.adminAccess,
+      }));
+
+      return res.json(out);
+    } catch (err) {
+      console.error('GET /users ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la lecture des utilisateurs.' });
+    }
+  }
+);
+
+/* ---------- PATCH /users/:id ---------- */
+/**
+ * PATCH /users/:id
+ * Permet de modifier: prenom, nom, email, idScout, niveau, branche, region
+ */
+router.patch(
+  '/:id',
+  requireAuth,
+  [
+    param('id').isMongoId(),
+    body('prenom').optional().isString(),
+    body('nom').optional().isString(),
+    body('email').optional().isEmail(),
+    body('idScout').optional().isString(),
+    body('niveau').optional().isString(),
+    body('branche').optional().isString(),
+    body('region').optional().isString(),
+  ],
+  async (req, res) => {
+    if (bad(req, res)) return;
+    if (!ensureAdmin(req, res)) return;
+
+    const { id } = req.params;
+    const { prenom, nom, email, idScout, niveau, branche, region } = req.body;
+
+    const update = {};
+    if (typeof prenom !== 'undefined') update.prenom = prenom;
+    if (typeof nom !== 'undefined') update.nom = nom;
+    if (typeof email !== 'undefined') update.email = email;
+    if (typeof idScout !== 'undefined') update.idScout = idScout;
+    if (typeof niveau !== 'undefined') update.niveau = niveau;
+    if (typeof branche !== 'undefined') update.branche = branche;
+    if (typeof region !== 'undefined') update.region = region;
+
+    try {
+      const user = await User.findByIdAndUpdate(
+        id,
+        { $set: update },
+        { new: true }
+      ).select('prenom nom email idScout region niveau branche role adminAccess');
+
+      if (!user) {
+        return res.status(404).json({ message: 'Utilisateur introuvable.' });
+      }
+
+      return res.json({
+        _id: user._id,
+        prenom: user.prenom || '',
+        nom: user.nom || '',
+        email: user.email || '',
+        idScout: user.idScout || '',
+        region: user.region || '',
+        niveau: user.niveau || '',
+        branche: user.branche || '',
+        role: user.role,
+        adminAccess: user.adminAccess,
+      });
+    } catch (err) {
+      console.error('PATCH /users/:id ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la mise à jour de l’utilisateur.' });
+    }
+  }
+);
+
+/* ---------- DELETE /users/:id ---------- */
+/**
+ * Suppression d’un utilisateur.
+ *
+ * ⚠️ Si tu préfères un "soft delete", remplace par:
+ *   - user.active = false; user.deletedAt = new Date(); user.save();
+ */
+router.delete(
+  '/:id',
+  requireAuth,
+  [param('id').isMongoId()],
+  async (req, res) => {
+    if (bad(req, res)) return;
+    if (!ensureAdmin(req, res)) return;
+
+    const { id } = req.params;
+
+    try {
+      const user = await User.findByIdAndDelete(id);
+
+      if (!user) {
+        return res.status(404).json({ message: 'Utilisateur introuvable.' });
+      }
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('DELETE /users/:id ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la suppression de l’utilisateur.' });
+    }
+  }
+);
+
+
+
 module.exports = router;

@@ -27,14 +27,18 @@ function frontBase(req) {
 async function toAuthJson(user) {
   if (!user) return null;
 
-  const [trainer, director] = await Promise.all([
+  const [trainer, director,coach,assistant] = await Promise.all([
     FormationAffectation.exists({ user: user._id, role: 'trainer' }),
     FormationAffectation.exists({ user: user._id, role: 'director' }),
+    FormationAffectation.exists({ user: user._id, role: 'coach' }),
+    FormationAffectation.exists({ user: user._id, role: 'assistant' }),
   ]);
 
   const json = user.toJSON();
   json.isSessionTrainer = !!trainer;
   json.isSessionDirector = !!director;
+  json.isSessionCoach = !!coach;
+  json.isSessionAssistant = !!assistant;
 
   return json;
 }

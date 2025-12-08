@@ -14,11 +14,11 @@ type CertifLite = {
   date?: string;
 };
 
-// Formation où je suis director / trainer
+// Formation où je suis director / trainer / assistant
 type FormationLite = {
   formationId: string;
   nom: string;
-  myRole: 'trainer' | 'director';
+  myRole: 'trainer' | 'director' | 'assistant' | string;
   sessionTitle?: string;
   startDate?: string;
   endDate?: string;
@@ -49,7 +49,7 @@ type EvaluationItem = {
 // Approbation d’un membre de l’équipe
 type EvaluationApproval = {
   user: string;
-  role: 'director' | 'trainer';
+  role: 'director' | 'trainer' | 'assistant';
   approvedAt: string;
 };
 
@@ -151,7 +151,7 @@ export default function EvalutaionTrainee(): React.JSX.Element {
   const [savingEvaluation, setSavingEvaluation] = React.useState(false);
   const [savingApproval, setSavingApproval] = React.useState(false);
 
-  // --------- Chargement des formations où je suis trainer / director ---------
+  // --------- Chargement des formations où je suis director / trainer / assistant ---------
   React.useEffect(() => {
     (async () => {
       try {
@@ -484,9 +484,12 @@ export default function EvalutaionTrainee(): React.JSX.Element {
           const isLoadingT = loadingTrainees[fid];
           const errT = errTrainees[fid] || null;
 
-          const isDirector = f.myRole === 'director';
+          const rawRole = ((f.myRole || '') + '').trim().toLowerCase();
+          const isDirector = rawRole === 'director';
+          const isTrainer = rawRole === 'trainer';
+          const isAssistant = rawRole === 'assistant';
 
-          // on ne garde que les présents (normalement le backend renvoie déjà que les présents)
+          // on ne garde que les présents
           const presentTrainees = list.filter(t => t.isPresent);
           const totalPages =
             presentTrainees.length === 0 ? 1 : Math.ceil(presentTrainees.length / PAGE_SIZE);
@@ -497,21 +500,27 @@ export default function EvalutaionTrainee(): React.JSX.Element {
 
           const isCurrentFormationActive = activeFormationId === fid;
 
-          // evaluation courante (si un stagiaire est sélectionné)
           const currentEval =
             isCurrentFormationActive && activeTrainee
               ? (list.find(t => t._id === activeTrainee._id)?.evaluation || null)
               : null;
 
-          // ✅ nombre de users distincts qui ont approuvé
-          const distinctUsers = new Set(
-            (currentEval?.approvals || []).map(a => a.user)
-          );
-          const teamApprovalsCount = distinctUsers.size;
-
           const isEvaluationValidated = currentEval?.status === 'validated';
 
-          // ✅ tous les critères de la session/formation ont-ils été évalués ?
+          // trainer approvals (info)
+          const trainerApprovals = (currentEval?.approvals || []).filter(
+            a => a.role === 'trainer'
+          );
+          const distinctTrainerUsers = new Set(trainerApprovals.map(a => a.user));
+          const trainerApprovalsCount = distinctTrainerUsers.size;
+
+          // assistant ne voit le tableau que si VALIDATED
+          const canShowCriteriaTable =
+            !loadingCriteres &&
+            !errCriteres &&
+            criteres.length > 0 &&
+            (!isAssistant || (isAssistant && isEvaluationValidated));
+
           const allCriteriaEvaluated =
             !!currentEval &&
             criteres.length > 0 &&
@@ -620,17 +629,26 @@ export default function EvalutaionTrainee(): React.JSX.Element {
                             <span style={{ fontWeight: 700 }}>
                               {getStatusLabel(currentEval.status)}
                             </span>
-                            {teamApprovalsCount > 0 && (
+                            {trainerApprovalsCount > 0 && (
                               <span style={{ marginInlineStart: 8 }}>
-                                – عدد القيادات التي صادقت: {teamApprovalsCount}
+                                – عدد المدربين الذين صادقوا: {trainerApprovalsCount}
                               </span>
                             )}
                           </div>
                         )}
 
-                        {!isDirector && (
+                        {/* Messages d’info selon le rôle */}
+                        {isTrainer && (
                           <div style={{ color: '#6b7280', marginBottom: 8 }}>
-                            يمكنك فقط عرض معايير التقييم. إدخال النقاط مخصص لقائد الدورة فقط.
+                            إدخال النقاط مخصص لقائد الدراسة. يمكنك المصادقة بعد اكتمال التقييم.
+                          </div>
+                        )}
+
+                        {/* Assistant : tant que pas VALIDATED → pas de tableau */}
+                        {isAssistant && !isEvaluationValidated && (
+                          <div style={{ color: '#6b7280', marginBottom: 8 }}>
+                            التقييم قيد المصادقة من طرف قائد الدراسة والمدربين. يمكنك
+                            الإطلاع على تفاصيل التقييم بعد اكتمال جميع المصادقات.
                           </div>
                         )}
 
@@ -646,7 +664,10 @@ export default function EvalutaionTrainee(): React.JSX.Element {
                           </div>
                         )}
 
-                        {!loadingCriteres && !errCriteres && criteres.length > 0 && (
+                        {/* Tableau de critères :
+                            - director / trainer : dès que critères chargés
+                            - assistant : uniquement si VALIDATED */}
+                        {canShowCriteriaTable && (
                           <>
                             <div style={{ overflowX: 'auto' }}>
                               <table style={styles.table}>
@@ -681,8 +702,12 @@ export default function EvalutaionTrainee(): React.JSX.Element {
                                             max={c.maxnote}
                                             step={1}
                                             value={notesByCritere[c._id] ?? ''}
-                                            disabled={!isDirector || isEvaluationValidated}
-                                            onChange={e => onChangeNote(c._id, e.target.value)}
+                                            disabled={
+                                              !isDirector || isEvaluationValidated || isAssistant
+                                            }
+                                            onChange={e =>
+                                              onChangeNote(c._id, e.target.value)
+                                            }
                                             style={styles.noteInput}
                                           />
                                         </td>
@@ -710,24 +735,35 @@ export default function EvalutaionTrainee(): React.JSX.Element {
                                   : 'لم يتم إنشاء تقييم بعد.'}
                               </div>
 
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                                  {/* Bouton validation des notes → Director uniquement,
-                                      masqué si l’évaluation est validée */}
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: 4,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    gap: 8,
+                                    justifyContent: 'flex-end',
+                                  }}
+                                >
+                                  {/* Director : saisie / validation des notes */}
                                   {isDirector && !isEvaluationValidated && (
                                     <button
                                       onClick={() => onSaveEvaluation(f)}
                                       style={styles.saveEvalBtn}
                                       disabled={savingEvaluation}
                                     >
-                                      {savingEvaluation ? '… جاري الحفظ' : 'تأكيد التقييم'}
+                                      {savingEvaluation
+                                        ? '… جاري الحفظ'
+                                        : 'تأكيد التقييم'}
                                     </button>
                                   )}
 
-                                  {/* Bouton d’approbation → Trainer uniquement,
-                                      masqué si l’évaluation est validée
-                                      ET si tous les critères ne sont pas évalués */}
-                                  {f.myRole === 'trainer' &&
+                                  {/* Trainer : bouton d’approbation uniquement */}
+                                  {isTrainer &&
                                     !isEvaluationValidated &&
                                     allCriteriaEvaluated && (
                                       <button
@@ -740,14 +776,22 @@ export default function EvalutaionTrainee(): React.JSX.Element {
                                           : 'أصادق على هذا التقييم'}
                                       </button>
                                     )}
+                                  {/* Assistant : jamais de bouton */}
                                 </div>
 
                                 {/* Message d’info si le trainer ne peut pas encore valider */}
-                                {f.myRole === 'trainer' &&
+                                {isTrainer &&
                                   !isEvaluationValidated &&
                                   !allCriteriaEvaluated && (
-                                    <div style={{ fontSize: 11, color: '#b91c1c', textAlign: 'left' }}>
-                                      يجب إسناد عدد لكل معيار تقييم قبل المصادقة على التقييم.
+                                    <div
+                                      style={{
+                                        fontSize: 11,
+                                        color: '#b91c1c',
+                                        textAlign: 'left',
+                                      }}
+                                    >
+                                      يجب إسناد عدد لكل معيار تقييم قبل المصادقة على
+                                      التقييم.
                                     </div>
                                   )}
                               </div>
@@ -755,11 +799,13 @@ export default function EvalutaionTrainee(): React.JSX.Element {
                           </>
                         )}
 
-                        {!loadingCriteres && !errCriteres && criteres.length === 0 && (
-                          <div style={{ color: '#9ca3af', marginTop: 8 }}>
-                            لا توجد معايير تقييم معرفة لهذه الدورة/المستوى.
-                          </div>
-                        )}
+                        {!loadingCriteres &&
+                          !errCriteres &&
+                          criteres.length === 0 && (
+                            <div style={{ color: '#9ca3af', marginTop: 8 }}>
+                              لا توجد معايير تقييم معرفة لهذه الدورة/المستوى.
+                            </div>
+                          )}
                       </div>
                     )}
                   </div>
@@ -926,7 +972,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   pill: {
     borderRadius: 999,
-    border: '1px solid #e5e7eb',
+    border: '1px solid #e9edf3',
     padding: '4px 10px',
     background: '#f9fafb',
     cursor: 'pointer',
@@ -997,7 +1043,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   pageBtn: {
     borderRadius: 999,
-    border: '1px solid #e5e7eb',
+    border: '1px solid #e9edf3',
     padding: '4px 10px',
     background: '#f9fafb',
     cursor: 'pointer',

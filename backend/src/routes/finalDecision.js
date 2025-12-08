@@ -7,6 +7,8 @@ const FinalDecision = require('../models/finalDecision');
 const Evaluation = require('../models/evaluation');
 const Formation = require('../models/formation');
 const SessionAffectation = require('../models/affectation');
+const FormationReport = require('../models/formationReport');
+
 const User = require('../models/user'); 
 const { generateFinalResultsPdf } = require('../services/pdf');// si tu en as besoin ailleurs
 
@@ -40,7 +42,6 @@ function computeTotals(ev) {
 }
 
 /* ----------- préparation des données du report ----------- */
-
 async function buildFinalResultsReportData(formationId) {
   // 1) Formation + session + centre
   const formation = await Formation.findById(formationId)
@@ -91,35 +92,33 @@ async function buildFinalResultsReportData(formationId) {
     .populate({ path: 'approvals.user', select: 'prenom nom' })
     .lean();
 
- // 4) Évaluations validées (pour calculer note & %)
-// + populate items.critere vers Critere
-const evalDocs = await Evaluation.find({
-  formation: formationId,
-  status: 'validated',
-})
-  .populate({ path: 'trainee', select: '_id' })
-  .populate({
-    path: 'items.critere',
-    select: 'famille critere',
+  // 4) Évaluations validées (pour calculer note & %)
+  const evalDocs = await Evaluation.find({
+    formation: formationId,
+    status: 'validated',
   })
-  .lean();
+    .populate({ path: 'trainee', select: '_id' })
+    .populate({
+      path: 'items.critere',
+      select: 'famille critere',
+    })
+    .lean();
 
-const evalByTraineeId = new Map();
-for (const ev of evalDocs) {
-  const t = ev.trainee;
-  if (!t) continue;
-  const uid = t._id ? String(t._id) : String(t);
+  const evalByTraineeId = new Map();
+  for (const ev of evalDocs) {
+    const t = ev.trainee;
+    if (!t) continue;
+    const uid = t._id ? String(t._id) : String(t);
 
-  // Injection labels depuis Critere
-  ev.items = (ev.items || []).map(it => ({
-    ...it,
-    familleLabel: it.critere?.famille || '',
-    critereLabel: it.critere?.critere || '',
-  }));
+    // Injection labels depuis Critere
+    ev.items = (ev.items || []).map(it => ({
+      ...it,
+      familleLabel: it.critere?.famille || '',
+      critereLabel: it.critere?.critere || '',
+    }));
 
-  evalByTraineeId.set(uid, ev);
-}
-
+    evalByTraineeId.set(uid, ev);
+  }
 
   // 5) Construction de la liste "trainees" pour le tableau global
   let successCount = 0;
@@ -161,10 +160,10 @@ for (const ev of evalDocs) {
     });
   }
 
-  // 6) Équipe de direction (director + trainer) depuis SessionAffectation
+  // 6) Équipe de direction (director + trainer + assistant + coach) depuis SessionAffectation
   const teamAffects = await SessionAffectation.find({
     formation: formationId,
-    role: { $in: ['director', 'trainer'] },
+    role: { $in: ['director', 'trainer', 'assistant', 'coach'] },
   })
     .populate({ path: 'user', select: 'prenom nom signatureUrl' })
     .lean();
@@ -222,7 +221,7 @@ for (const ev of evalDocs) {
       userId: uid,
       prenom: u.prenom || '',
       nom: u.nom || '',
-      role: a.role, // 'director' | 'trainer'
+      role: a.role, // 'director' | 'trainer' | 'assistant' | 'coach'
       hasApproved: info.hasApproved,
       lastApprovedAt: info.lastApprovedAt
         ? info.lastApprovedAt.toISOString()
@@ -243,6 +242,52 @@ for (const ev of evalDocs) {
 
   // 8) Director principal (on prend le premier role=director)
   const director = team.find(m => m.role === 'director') || null;
+
+  // 9) Rapports director / coach
+  //  - si tu veux vraiment "signés seulement", ajoute un filtre { signedAt: { $ne: null } }
+  const directorReportDoc = await FormationReport.findOne({
+    formation: formationId,
+    role: 'director',
+  })
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .populate({ path: 'user', select: 'prenom nom' })
+    .lean();
+
+  const coachReportDoc = await FormationReport.findOne({
+    formation: formationId,
+    role: 'coach',
+  })
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .populate({ path: 'user', select: 'prenom nom' })
+    .lean();
+
+  let directorReport = null;
+  if (directorReportDoc) {
+    const u = directorReportDoc.user || {};
+    directorReport = {
+      prenom: u.prenom || '',
+      nom: u.nom || '',
+      block1: directorReportDoc.block1 || '',
+      block2: directorReportDoc.block2 || '',
+      block3: directorReportDoc.block3 || '',
+      signedAt: directorReportDoc.signedAt || null,
+      updatedAt: directorReportDoc.updatedAt || null,
+    };
+  }
+
+  let coachReport = null;
+  if (coachReportDoc) {
+    const u = coachReportDoc.user || {};
+    coachReport = {
+      prenom: u.prenom || '',
+      nom: u.nom || '',
+      block1: coachReportDoc.block1 || '',
+      block2: coachReportDoc.block2 || '',
+      block3: coachReportDoc.block3 || '',
+      signedAt: coachReportDoc.signedAt || null,
+      updatedAt: coachReportDoc.updatedAt || null,
+    };
+  }
 
   return {
     formation: {
@@ -271,6 +316,8 @@ for (const ev of evalDocs) {
       validationDate: validationDate ? validationDate.toISOString() : null,
     },
     team, // pour signatures & rôles
+    directorReport,
+    coachReport,
     decisionsRaw: decisionsDocs, // si besoin debug
     meta: {
       anyTrainerApproved,
@@ -278,6 +325,8 @@ for (const ev of evalDocs) {
     },
   };
 }
+
+
 
 /* ----------------- GET /report-data ----------------- */
 

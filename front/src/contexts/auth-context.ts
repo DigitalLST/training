@@ -12,6 +12,8 @@ export type User = {
   role:Role;
   isSessionTrainer?: boolean;
   isSessionDirector?: boolean;
+  isSessionCoach?: boolean;
+  isSessionAssistant?: boolean;
 };
 
 export type AuthState = {

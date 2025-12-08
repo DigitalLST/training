@@ -1,42 +1,118 @@
+// src/components/trainer/Header.tsx (par ex.)
+import React from 'react';
+import { NavLink, useLocation, matchPath } from 'react-router-dom';
+import { useAuth } from '../../contexts/UseAuth';
+import {
+  isSessionDirector,
+  isSessionCoach,
+} from '../../utils/role';
+
 type HeaderProps = {
   userName?: string;          // ex: "digital digital - Tunis"
   onLogout?: () => void;      // callback au clic sur "تسجيل الخروج"
 };
-import { NavLink, useLocation,matchPath } from 'react-router-dom';
 
-const MENU = [
-  { label: 'الرئيسية',               to: '/acceuil',   },
-  { label: 'قائمة المتدربين',   to: '/trainer/infostrainee',   activeFor: ['/trainer/infostrainee'] },
-  { label: 'تقييم المتدربين', to: '/trainer/evaluationtrainee', activeFor: ['/trainer/evaluationtrainee','/admin/evaluation'] }, // alias OK
-  { label: 'النتائج النهائية',   to: '/trainer/resultattrainee',   activeFor: [ '/trainer/resultattrainee'] },
+type Visibility = 'allExceptCoach' | 'coachOnly' | 'directorOnly' | undefined;
+
+type MenuItem = {
+  label: string;
+  to: string;
+  activeFor?: string[];
+  visibleFor?: Visibility;
+};
+
+const MENU: MenuItem[] = [
+  {
+    label: 'الرئيسية',
+    to: '/acceuil',
+  },
+  {
+    label: 'قائمة المتدربين',
+    to: '/trainer/infostrainee',
+    activeFor: ['/trainer/infostrainee'],
+    visibleFor: 'allExceptCoach',
+  },
+  {
+    label: 'تقييم المتدربين',
+    to: '/trainer/evaluationtrainee',
+    activeFor: ['/trainer/evaluationtrainee', '/admin/evaluation'],
+    visibleFor: 'allExceptCoach',
+  },
+  {
+    label: 'النتائج النهائية',
+    to: '/trainer/resultattrainee',
+    activeFor: ['/trainer/resultattrainee'],
+    visibleFor: 'allExceptCoach',
+  },
+  {
+    label: 'تقرير قائد الدورة',
+    to: '/trainer/directorreport',
+    activeFor: ['/trainer/directorreport'],
+    visibleFor: 'directorOnly',
+  },
+  {
+    label: 'تقرير المرشد الفني',
+    to: '/trainer/coachreport',
+    activeFor: ['/trainer/coachreport'],
+    visibleFor: 'coachOnly',
+  },
 ];
 
-export default function Header({ userName = 'مستخدم', onLogout }: HeaderProps): React.JSX.Element {
-  const { pathname } = useLocation();  
-  const at = (pathname.replace(/\/+$/, '') || '/'); // normalize trailing slash
+export default function Header({
+  userName = 'مستخدم',
+  onLogout,
+}: HeaderProps): React.JSX.Element {
+  const { pathname } = useLocation();
+  const { user } = useAuth();
+  const at = pathname.replace(/\/+$/, '') || '/'; // normalize trailing slash
 
-  const isActive = (item: (typeof MENU)[number]) => {
-    // Home must be EXACT
-    if (item.to === '/trainer') {
-      return !!matchPath({ path: '/trainer', end: true }, at);
+  const isDirector = isSessionDirector(user);
+  const isCoach = isSessionCoach(user);
+  // (assistant / trainer dispo si tu veux raffiner plus tard)
+
+  const canSeeItem = (item: MenuItem): boolean => {
+    if (!user) return false; // zone protégée, par sécurité
+
+    switch (item.visibleFor) {
+      case 'coachOnly':
+        return isCoach;
+      case 'directorOnly':
+        return isDirector;
+      case 'allExceptCoach':
+        return !isCoach;
+      default:
+        return true;
     }
-    // If aliases provided, match any (non-exact)
-    if (item.activeFor?.length) {
-      return item.activeFor.some(p => !!matchPath({ path: p, end: false }, at));
-    }
-    // Default: active on the section and its children
-    return !!matchPath({ path: item.to, end: false }, at)
-        || !!matchPath({ path: `${item.to}/*`, end: false }, at);
   };
+
+  const isActive = (item: MenuItem) => {
+    // "الرئيسية" = home → exact
+    if (item.to === '/acceuil') {
+      return !!matchPath({ path: '/acceuil', end: true }, at);
+    }
+    // Si aliases fournis, match n'importe lequel
+    if (item.activeFor?.length) {
+      return item.activeFor.some((p) =>
+        !!matchPath({ path: p, end: false }, at),
+      );
+    }
+    // Sinon, actif sur la section + ses enfants
+    return (
+      !!matchPath({ path: item.to, end: false }, at) ||
+      !!matchPath({ path: `${item.to}/*`, end: false }, at)
+    );
+  };
+
+  const visibleMenu = MENU.filter(canSeeItem);
+
   return (
     <>
       <div style={styles.header}>
         {/* Bloc marque / logos */}
-
         <div style={styles.brand}>
           <div>
-            <img src="/logo.png" alt="" style={styles.logo}/> 
-          </div>   
+            <img src="/logo.png" alt="" style={styles.logo} />
+          </div>
           <div>
             <div style={styles.brand}>الكشافة التونسية</div>
             <div style={styles.brand}>اللجنة الوطنية لتنمية القيادات</div>
@@ -44,30 +120,30 @@ export default function Header({ userName = 'مستخدم', onLogout }: HeaderPr
         </div>
 
         {/* Navigation (pills) */}
-    <nav style={styles.nav}>
-      {MENU.map(item => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          // `end` ensures NavLink itself is exact for Home, but we also style via isActive()
-          end={item.to === '/trainer'}
-          style={() => pill(isActive(item))}
-        >
-          {item.label}
-        </NavLink>
-      ))}
-    </nav> 
+        <nav style={styles.nav}>
+          {visibleMenu.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/acceuil'}
+              style={() => pill(isActive(item))}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
 
         {/* Profil + logout */}
         <div style={styles.profile}>
-          <div style={styles.avatarOutline}/> 
+          <div style={styles.avatarOutline} />
           <div>{userName}</div>
-          <button onClick={onLogout} style={pill(false)}>تسجيل الخروج</button>
-
+          <button onClick={onLogout} style={pill(false)}>
+            تسجيل الخروج
+          </button>
         </div>
       </div>
 
-      <div style={styles.separator}/>
+      <div style={styles.separator} />
     </>
   );
 }
@@ -99,7 +175,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 16,
     boxShadow: '0 8px 24px rgba(0,0,0,.06)',
   },
-  avatarOutline: { width: 28, height: 28, border: '2px solid #e20514', borderRadius: '50%' },
+  avatarOutline: {
+    width: 28,
+    height: 28,
+    border: '2px solid #e20514',
+    borderRadius: '50%',
+  },
   separator: { height: 1, background: '#e9edf3', margin: '6px 0 24px' },
 };
 

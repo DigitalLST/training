@@ -65,12 +65,12 @@ export default function MainLayout(): React.JSX.Element {
             )}
             {isAdmin(user) && (
             <>
-              <MenuLink to='/superadmin'>فضاء اللجنة الوطنية </MenuLink>
+              <MenuLink to='/admin'>فضاء اللجنة الوطنية </MenuLink>
             </>
             )}
             {canAccessModeratorRegional(user) && (
                         <>
-              <MenuLink to='/adminregion'>فضاء اللجنة الجهوية </MenuLink>
+              <MenuLink to='/moderatorregion'>فضاء اللجنة الجهوية </MenuLink>
             </>
             )}
 

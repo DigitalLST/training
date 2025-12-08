@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import RequireAuth from './guards/RequireAuth';
 import ProtectedSection from './components/ProtectedSection';
 import MainLayout from './layouts/Main';
+import AdminLayout from './layouts/Admin';
 import PublicLayout from './layouts/Public';
 import ModeratorLayout from './layouts/Moderator';
 import TrainerLayout from './layouts/Trainer';
@@ -36,10 +37,18 @@ import GestionAffectationModerator from './moderator/screens/GestionAffectation'
 import GestionModerator from './moderator/screens/GestionModerator';
 import ResultatFinaleModerator from './moderator/screens/ResultatFinale';
 import ResultatDetailModerator from './moderator/screens/ٍResultatDetail';
+import ModeratorCoachReport from './moderator/screens/CoachReport';
+import ModeratorDirectorReport from './moderator/screens/DirectorReport';
 import TrainerHome from './trainer/screens/Home';
 import InfoTrainee from './trainer/screens/InfosTrainee';
 import EvalutaionTrainee from './trainer/screens/EvalutaionTrainee';
 import EvaluationFinale from './trainer/screens/EvaluationFinale';
+import CoachReport from './trainer/screens/RapportCoach';
+import DirectorReport from './trainer/screens/ReportDirector';
+import AdminHome from './admin/screens/AdminHome';
+import GestionAdmins from './admin/screens/ManageAdmins';
+import GestionUsers from './admin/screens/ManageUsers';
+import AdminUpdateEval from './admin/screens/UpdateEval';
 
 export default function App() {
   return (
@@ -110,24 +119,65 @@ export default function App() {
           <Route path="gestionmoderators" element={<GestionModerator />} />
           <Route path="finalresults" element={<ResultatFinaleModerator />} />
           <Route path="detailresults" element={<ResultatDetailModerator />} />
+          <Route path="rapportdirecteur" element={<ModeratorDirectorReport />} />
+          <Route path="rapportcoach" element={<ModeratorCoachReport />} />
 
 
         </Route> 
       </Route>  
+
       <Route element={<RequireAuth />}>
-        {/* ----- Moderator ----- */}
+        {/* ----- Admin ----- */}
         <Route
-          path="/trainer/*"
+          path="/admin/*"
           element={
-            <ProtectedSection section="director_space">
-              <TrainerLayout />
+            <ProtectedSection section="admin">
+              <AdminLayout />
             </ProtectedSection>
           }
         >
-          <Route index element={<TrainerHome />} />
-          <Route path="infostrainee" element={<InfoTrainee />} />
-          <Route path="evaluationtrainee" element={<EvalutaionTrainee />} />
-          <Route path="resultattrainee" element={<EvaluationFinale />} />
+          <Route index element={<AdminHome />} />
+          <Route path="gestionadmin" element={<GestionAdmins />} />
+          <Route path="gestionbd" element={<GestionUsers />} />
+          <Route path="updateeval" element={<AdminUpdateEval />} />
+
+        </Route> 
+      </Route>  
+     
+
+      <Route element={<RequireAuth />}>
+        {/* ----- Trainer ----- */}
+        <Route path="/trainer" element={<TrainerLayout />}>
+          <Route index element={
+            <ProtectedSection section="direction_space">
+            <TrainerHome />
+            </ProtectedSection>
+            } />
+          <Route path="infostrainee" element={
+            <ProtectedSection section="team_space">
+            <InfoTrainee />
+            </ProtectedSection>
+            } 
+            />
+          <Route path="evaluationtrainee" element={<ProtectedSection section="team_space"><EvalutaionTrainee /></ProtectedSection>} />
+          <Route path="resultattrainee" element={<ProtectedSection section="team_space"><EvaluationFinale /></ProtectedSection>} />
+          <Route
+    path="coachreport"
+    element={
+      <ProtectedSection section="coach_space">
+        <CoachReport />
+      </ProtectedSection>
+    }
+  />
+   <Route
+    path="directorreport"
+    element={
+      <ProtectedSection section="director_space">
+        <DirectorReport />
+      </ProtectedSection>
+    }
+  />
+
           
         </Route> 
       </Route>  

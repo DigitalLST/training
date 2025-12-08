@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const SessionAffectationSchema = new mongoose.Schema({
   formation: { type: mongoose.Schema.Types.ObjectId, ref: 'Formation', required: true, index: true },
   user:    { type: mongoose.Schema.Types.ObjectId, ref: 'User',    required: true, index: true },
-  role:    { type: String, enum: ['director','trainer','trainee'], required: true },
+  role:    { type: String, enum: ['director','trainer','trainee','coach','assistant'], required: true },
   isPresent: {
       type: Boolean,
       default: false,

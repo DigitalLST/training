@@ -19,6 +19,9 @@ const ModeratorRoutes=require('../src/routes/moderators');
 const evaluationRoutes = require('../src/routes/evaluations');
 const decisionRoutes=require('../src/routes/finalDecision');
 const meRoutes = require('../src/routes/me');
+const reportRoutes = require('../src/routes/reports');
+const adminRoutes = require('../src/routes/admins');
+const adminEvaluationsRouter = require('./routes/adminEvaluations');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -34,6 +37,7 @@ app.use('/api/sessions',sessionRoutes );
 app.use('/api/centres',centreRoutes );
 app.use('/api/auth',AuthRouter );
 app.use('/api/users', usersRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/criteres', critereRoutes);
 app.use('/api/demandes', DemandeParticipationRoutes);
 app.use('/api/formations',FormationRoutes);
@@ -41,6 +45,8 @@ app.use('/api/affectations',AffectationRoutes);
 app.use('/api/moderators',ModeratorRoutes);
 app.use('/api/evaluations', evaluationRoutes);
 app.use('/api/final-decisions', decisionRoutes);
+app.use('/api/admins', adminRoutes);
+app.use('/api/admin/evaluations', adminEvaluationsRouter);
 app.use(
   '/static/signatures',
   express.static(path.join(__dirname, SIGNATURE_DIR))

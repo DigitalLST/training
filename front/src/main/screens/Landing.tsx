@@ -6,7 +6,7 @@ import {
   isAdmin,
   canAccessModeratorNational,
   canAccessModeratorRegional,
-  canAccessDirectorSpace,
+  canAccessTeamSpace,
 } from '../../utils/role';
 
 //const asBool = (v: unknown) => v === true || v === 'true' || v === 1 || v === '1';
@@ -30,14 +30,14 @@ export default function LandingMain(): React.JSX.Element {
   {canAccessModeratorNational(user) && (
   <Card onClick={()=>nav('/moderator')} img="" title="فضاء إدارة التدريب" />
 )}
- {canAccessDirectorSpace(user) && (
+ {canAccessTeamSpace(user) && (
   <Card onClick={()=>nav('/trainer')} img="" title="فضاء قائد الدورة" />
   )}
  {isAdmin(user) && (
-  <Card onClick={()=>nav('/superadmin')} img="/national_committee.png" title="فضاء اللجنة الوطنية" />
+  <Card onClick={()=>nav('/admin')} img="/national_committee.png" title="فضاء اللجنة الوطنية" />
   )}
    {canAccessModeratorRegional(user) && (
-    <Card onClick={()=>nav('/adminregion')} img="/national_committee.png" title="فضاء اللجنة الجهوية" />
+    <Card onClick={()=>nav('/moderatorregion')} img="/national_committee.png" title="فضاء اللجنة الجهوية" />
 )}
         <Card onClick={()=>nav('/contact_us')}  img="/contact_us.png"  title="إتصل بنا" />
         <Card onClick={()=>nav('/profile')}  img="/account.png"  title="تغيير معطيات الحساب" />

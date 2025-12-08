@@ -1,13 +1,23 @@
-// src/screens/GestionAffectation.tsx
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api/api';
 
-type Role = 'trainer' | 'trainee' | 'director';
-type UserLite = { _id: string; prenom: string; nom: string; email: string; idScout: string };
-type Assign = { user: UserLite; role: Role };
+type Role = 'director' | 'trainer' | 'assistant' | 'coach' | 'trainee';
 
-// Contexte: on accepte formationId *ou* sessionId selon d'où on vient
+type UserLite = {
+  _id: string;
+  prenom: string;
+  nom: string;
+  email: string;
+  idScout: string;
+};
+
+type Assign = {
+  user: UserLite;
+  role: Role;
+};
+
+/* ----------- Contexte navigation ----------- */
 type RawCtx = {
   formationId?: string; fid?: string;
   sessionId?: string; sid?: string;
@@ -17,8 +27,8 @@ type RawCtx = {
 };
 
 type Ctx = {
-  sid: string;
   fid?: string | null;
+  sid: string;
   title?: string;
   type?: string;
   period?: string;
@@ -45,10 +55,13 @@ function normalizeCtx(raw: RawCtx | null | undefined): Partial<Ctx> | null {
 }
 
 const RED = '#e20514';
+
 const ROLE_LABEL: Record<Role, string> = {
-  trainer: 'قيادة الدورة',
-  trainee: 'متدرب',
   director: 'قائد الدورة',
+  trainer: 'قيادة الدورة ـ مدرب',
+  assistant: 'قيادة الدورة ـ حامل شارة',
+  coach: 'المرشد الفني',
+  trainee: 'متدرب',
 };
 
 export default function GestionAffectation(): React.ReactElement | null {
@@ -57,11 +70,12 @@ export default function GestionAffectation(): React.ReactElement | null {
 
   const fromState = React.useMemo(() => normalizeCtx(loc.state), [loc.state]);
   const fromStorage = React.useMemo(() => readCtxFromStorage(), []);
+
   const [ctx, setCtx] = React.useState<Ctx | null>(() => {
     const base = fromStorage || ({} as Ctx);
     const over = fromState || {};
     return {
-      fid: over.fid ?? (base?.fid ?? null),
+      fid: over.fid ?? base?.fid ?? null,
       sid: over.sid || base?.sid || '',
       title: over.title ?? base?.title,
       type: over.type ?? base?.type,
@@ -78,10 +92,11 @@ export default function GestionAffectation(): React.ReactElement | null {
     sessionTitle?: string;
   } | null>(null);
 
+  /* ---------------- Synchronisation du contexte ---------------- */
   React.useEffect(() => {
     if (fromState) {
       const merged: Ctx = {
-        fid: (fromState.fid ?? ctx?.fid) ?? null,
+        fid: fromState.fid ?? ctx?.fid ?? null,
         sid: fromState.sid || ctx?.sid || '',
         title: fromState.title ?? ctx?.title,
         type: fromState.type ?? ctx?.type,
@@ -90,14 +105,12 @@ export default function GestionAffectation(): React.ReactElement | null {
       setCtx(merged);
       sessionStorage.setItem(STORE_KEY, JSON.stringify(merged));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromState]);
 
-  // Résoudre sessionId + charger détails formation via /formations/:fid
+  /* ---------------- Charger les infos de formation si fid change ---------------- */
   React.useEffect(() => {
     (async () => {
-      if (!ctx) return;
-      if (!ctx.fid) return;
+      if (!ctx?.fid) return;
 
       try {
         const f = await api(`/formations/${ctx.fid}`);
@@ -109,6 +122,7 @@ export default function GestionAffectation(): React.ReactElement | null {
           branches: Array.isArray(f?.branches) ? f.branches : [],
           sessionTitle: f?.sessionTitle || '',
         });
+
         if (!ctx.sid || !ctx.title) {
           const next: Ctx = {
             fid: ctx.fid,
@@ -121,45 +135,47 @@ export default function GestionAffectation(): React.ReactElement | null {
           sessionStorage.setItem(STORE_KEY, JSON.stringify(next));
         }
       } catch (e) {
-        console.error('resolve session/formation failed', e);
+        console.error('resolve formation info failed', e);
       }
     })();
-  }, [ctx]);
+  }, [ctx?.fid]);
 
   React.useEffect(() => {
     if (!ctx?.fid) {
       nav('/moderator/gestionparticipant', { replace: true });
     }
-  }, [ctx?.fid, nav]);
+  }, [ctx?.fid]);
 
   if (!ctx?.fid) return null;
 
   const { fid } = ctx;
+
   const [sessionTitle, setSessionTitle] = React.useState(ctx.title ?? '');
-  React.useEffect(() => { setSessionTitle(ctx.title ?? ''); }, [ctx.title]);
+  React.useEffect(() => setSessionTitle(ctx.title ?? ''), [ctx.title]);
 
-  const [loading, setLoading]   = React.useState(true);
-  const [saving, setSaving]     = React.useState(false);
-  const [err, setErr]           = React.useState<string|null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
-  const [assigns, setAssigns]   = React.useState<Assign[]>([]);
-  const [initial, setInitial]   = React.useState<Assign[]>([]);
+  const [assigns, setAssigns] = React.useState<Assign[]>([]);
+  const [initial, setInitial] = React.useState<Assign[]>([]);
 
-  const [role, setRole]         = React.useState<Role>('trainee');
-  const [q, setQ]               = React.useState('');
-  const [sugs, setSugs]         = React.useState<UserLite[]>([]);
-  const [hi, setHi]             = React.useState(0);
+  const [role, setRole] = React.useState<Role>('director');
+  const [q, setQ] = React.useState('');
+  const [sugs, setSugs] = React.useState<UserLite[]>([]);
+  const [hi, setHi] = React.useState(0);
 
-  // charge les affectations existantes (tous rôles)
+  /* ---------------- Charger les affectations existantes ---------------- */
   React.useEffect(() => {
     (async () => {
       if (!fid) return;
+
       try {
         setLoading(true);
-        setErr(null);
         const list = await api(`/affectations/formations/${fid}/affectations`);
-        const mapped: Assign[] = (list || [])
-          .filter((a: any) => a.user) // ignore les affectations sans user si jamais
+
+        const mapped: Assign[] = list
+          .filter((a: any) => a.user)
           .map((a: any) => ({
             user: {
               _id: a.user._id,
@@ -170,54 +186,58 @@ export default function GestionAffectation(): React.ReactElement | null {
             },
             role: a.role as Role,
           }));
+
         setAssigns(mapped);
         setInitial(mapped);
       } catch (e: any) {
-        setErr(e?.message || 'تعذر تحميل التعيينات');
+        setErr(e?.message || 'تعذّر تحميل التعيينات');
       } finally {
         setLoading(false);
       }
     })();
   }, [fid]);
 
-  // auto-complétion / suggestions
+  /* ---------------- Auto-complétion selon rôle ---------------- */
   React.useEffect(() => {
     if (!fid) return;
 
+    // trainee => liste complète sans recherche
     if (role === 'trainee') {
       (async () => {
         try {
-          setErr(null);
           const res = await api(`/affectations/formations/${fid}/candidates?role=trainee`);
           setSugs(Array.isArray(res) ? res : []);
-          setHi(0);
         } catch (e: any) {
-          setErr(e?.message || 'تعذر تحميل المترشحين');
+          setErr(e?.message || 'تعذّر تحميل المترشحين');
         }
       })();
       return;
     }
 
-    if (!q.trim()) { setSugs([]); return; }
+    // autres rôles => recherche live
+    if (!q.trim()) {
+      setSugs([]);
+      return;
+    }
 
     const t = setTimeout(async () => {
       try {
-        setErr(null);
         const params = new URLSearchParams();
         params.set('role', role);
         params.set('q', q.trim());
 
-        const res = await api(`/affectations/formations/${fid}/candidates?${params.toString()}`);
+        const res = await api(`/affectations/formations/${fid}/candidates?${params}`);
         setSugs(Array.isArray(res) ? res : []);
         setHi(0);
       } catch (e: any) {
-        setErr(e?.message || 'تعذر البحث');
+        setErr(e?.message || 'تعذّر البحث');
       }
     }, 250);
 
     return () => clearTimeout(t);
-  }, [q, role, fid]);
+  }, [fid, q, role]);
 
+  /* ---------------- Ajout / mise à jour assignation ---------------- */
   function addOrUpdate(u: UserLite, r: Role) {
     setAssigns(prev => {
       const i = prev.findIndex(a => a.user._id === u._id);
@@ -229,10 +249,7 @@ export default function GestionAffectation(): React.ReactElement | null {
       return [...prev, { user: u, role: r }];
     });
     setQ('');
-    if (role !== 'trainee') {
-      setSugs([]);
-      setHi(0);
-    }
+    if (role !== 'trainee') setSugs([]);
   }
 
   function removeUser(uid: string) {
@@ -240,42 +257,36 @@ export default function GestionAffectation(): React.ReactElement | null {
   }
 
   function addAllTrainees() {
-    setAssigns(prev => {
-      const byId = new Map<string, Assign>();
-      prev.forEach(a => {
-        byId.set(a.user._id, a);
-      });
-      sugs.forEach(u => {
-        const existing = byId.get(u._id);
-        if (existing) {
-          byId.set(u._id, { ...existing, role: 'trainee' });
-        } else {
-          byId.set(u._id, { user: u, role: 'trainee' });
-        }
-      });
-      return Array.from(byId.values());
+    const byId = new Map(assigns.map(a => [a.user._id, a]));
+
+    sugs.forEach(u => {
+      const existing = byId.get(u._id);
+      if (existing) byId.set(u._id, { ...existing, role: 'trainee' });
+      else byId.set(u._id, { user: u, role: 'trainee' });
     });
+
+    setAssigns([...byId.values()]);
   }
 
-  function clearAllTrainees() {
-    setAssigns(prev => prev.filter(a => a.role !== 'trainee'));
-  }
-
+  /* ---------------- Sauvegarde ---------------- */
   async function onSave() {
     try {
-      setSaving(true); setErr(null);
+      setSaving(true);
 
       const toMap = (xs: Assign[]) => new Map(xs.map(a => [a.user._id, a.role]));
       const cur = toMap(assigns);
       const init = toMap(initial);
 
       const upserts: { userId: string; role: Role }[] = [];
+      const deletes: string[] = [];
+
       cur.forEach((r, uid) => {
         if (!init.has(uid) || init.get(uid) !== r) upserts.push({ userId: uid, role: r });
       });
 
-      const deletes: string[] = [];
-      init.forEach((_r, uid) => { if (!cur.has(uid)) deletes.push(uid); });
+      init.forEach((_r, uid) => {
+        if (!cur.has(uid)) deletes.push(uid);
+      });
 
       await api(`/affectations/formations/${fid}/affectations/diff`, {
         method: 'POST',
@@ -292,60 +303,34 @@ export default function GestionAffectation(): React.ReactElement | null {
     }
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (role === 'trainee') return;
-    if (!sugs.length) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => (h + 1) % sugs.length); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => (h - 1 + sugs.length) % sugs.length); }
-    else if (e.key === 'Enter') { e.preventDefault(); sugs[hi] && addOrUpdate(sugs[hi], role); }
-  }
-
-  const director = assigns.filter(a => a.role === 'director');
+  /* ---------------- Tri des rôles ---------------- */
+  const directors = assigns.filter(a => a.role === 'director');
   const trainers = assigns.filter(a => a.role === 'trainer');
+  const assistants = assigns.filter(a => a.role === 'assistant');
+  const coaches = assigns.filter(a => a.role === 'coach');
   const trainees = assigns.filter(a => a.role === 'trainee');
 
-  function handleDeleteAllTrainees() {
-    if (!trainees.length) return;
-    const ok = window.confirm('هل أنت متأكد من حذف جميع المتدربين من هذه الدورة؟');
-    if (!ok) return;
-    clearAllTrainees();
-  }
-
+  /* ---------------- UI ---------------- */
   const formationHeader = React.useMemo(() => {
     if (!formationInfo) return '';
-    const parts: string[] = [];
+    const parts = [];
     if (formationInfo.nom) parts.push(formationInfo.nom);
-    const centre = [formationInfo.centreTitle].filter(Boolean).join(' ');
-    if (centre) parts.push(centre);
+    if (formationInfo.centreTitle) parts.push(formationInfo.centreTitle);
     return parts.join(' • ');
   }, [formationInfo]);
 
   return (
-    <div
-      style={{
-        width: '50vw',
-        alignItems: 'center',
-        marginLeft: 20,
-        marginRight: 20,
-        paddingInline: 24,
-      }}
-    >
+    <div style={{ width: '50vw', paddingInline: 24 }}>
       <span style={styles.pageTitle}>إضافة المشاركين</span>
 
       <div style={styles.toolbar} dir="rtl">
         <div style={styles.toolbarRight}>
-          <button
-            onClick={() => nav(-1)}
-            style={styles.circleRedBtn}
-            aria-label="رجوع"
-          >
+          <button onClick={() => nav(-1)} style={styles.circleRedBtn}>
             <ArrowRightIcon />
           </button>
 
           <span>
-            {sessionTitle || formationInfo?.sessionTitle || 'جلسة'}
-            {' | '}
-            {formationHeader}
+            {sessionTitle || formationInfo?.sessionTitle || 'جلسة'} | {formationHeader}
           </span>
         </div>
       </div>
@@ -353,23 +338,28 @@ export default function GestionAffectation(): React.ReactElement | null {
       <div style={styles.redLine} />
 
       <div style={styles.card}>
+
+        {/* Sélecteur rôle + input recherche */}
         <div style={{ display:'grid', gap:8 }}>
-          <label style={styles.label}>إضافة متدرب / قيادة الدورة</label>
+          <label style={styles.label}>إضافة قيادة الدورة / المتدربين</label>
+
           <div style={{ display:'flex', gap:8 }}>
+
+            {/* -------- SELECT DES ROLES -------- */}
             <select
               value={role}
               onChange={e => {
-                const r = e.target.value as Role;
-                setRole(r);
+                setRole(e.target.value as Role);
                 setQ('');
                 setSugs([]);
-                setHi(0);
               }}
               style={styles.selection}
             >
-              <option value="trainee">{ROLE_LABEL.trainee}</option>
-              <option value="trainer">{ROLE_LABEL.trainer}</option>
               <option value="director">{ROLE_LABEL.director}</option>
+              <option value="trainer">{ROLE_LABEL.trainer}</option>
+              <option value="assistant">{ROLE_LABEL.assistant}</option>
+              <option value="coach">{ROLE_LABEL.coach}</option>
+              <option value="trainee">{ROLE_LABEL.trainee}</option>
             </select>
 
             {role !== 'trainee' && (
@@ -379,13 +369,12 @@ export default function GestionAffectation(): React.ReactElement | null {
                   placeholder="البريد / المعرف الكشفي / الاسم / اللقب"
                   value={q}
                   onChange={e => setQ(e.target.value)}
-                  onKeyDown={onKeyDown}
                 />
+
                 <button
                   type="button"
                   onClick={() => sugs[hi] && addOrUpdate(sugs[hi], role)}
                   style={styles.squareRedBtn}
-                  title="إضافة"
                   disabled={!sugs.length}
                 >
                   <PlusIcon />
@@ -394,25 +383,30 @@ export default function GestionAffectation(): React.ReactElement | null {
             )}
           </div>
 
-          {role !== 'trainee' && q.trim() && sugs.length > 0 && (
+          {/* DROPDOWN suggestions */}
+          {role !== 'trainee' && sugs.length > 0 && q.trim() && (
             <div style={styles.dropdown}>
               {sugs.map((u, i) => (
                 <button
                   key={u._id}
                   onClick={() => addOrUpdate(u, role)}
-                  style={{ ...styles.suggestion, background: i === hi ? 'rgba(226,5,20,.08)' : '#fff' }}
+                  style={{
+                    ...styles.suggestion,
+                    background: i === hi ? 'rgba(226,5,20,.08)' : '#fff',
+                  }}
                 >
-                  <div style={{ fontWeight: 800 }}>{u.prenom} {u.nom}</div>
-                  <div style={{ opacity: .85, fontSize: 13 }}>{u.email}</div>
-                  <div style={{ opacity: .75, fontSize: 12 }}>#{u.idScout}</div>
+                  <div style={{ fontWeight:800 }}>{u.prenom} {u.nom}</div>
+                  <div style={{ fontSize:13, opacity:.85 }}>{u.email}</div>
+                  <div style={{ fontSize:12, opacity:.75 }}>#{u.idScout}</div>
                 </button>
               ))}
             </div>
           )}
 
+          {/* LISTE CANDIDATS TRAINEE */}
           {role === 'trainee' && (
             <div style={{ display:'grid', gap:8 }}>
-              <div style={{ display:'flex', justifyContent:'flex-start', gap:8 }}>
+              <div style={{ display:'flex', gap:8 }}>
                 <button
                   type="button"
                   onClick={addAllTrainees}
@@ -420,14 +414,6 @@ export default function GestionAffectation(): React.ReactElement | null {
                   style={styles.pillPrimarySmall}
                 >
                   إضافة الكل
-                </button>
-                <button
-                  type="button"
-                  onClick={clearAllTrainees}
-                  disabled={!trainees.length}
-                  style={styles.pillGhostSmall}
-                >
-                  إلغاء الكل
                 </button>
               </div>
 
@@ -438,16 +424,19 @@ export default function GestionAffectation(): React.ReactElement | null {
                     <button
                       key={u._id}
                       type="button"
-                      onClick={() => selected ? removeUser(u._id) : addOrUpdate(u, 'trainee')}
+                      onClick={() => selected
+                        ? removeUser(u._id)
+                        : addOrUpdate(u, 'trainee')
+                      }
                       style={{
                         ...styles.chip,
                         background: selected ? RED : '#fff',
-                        color: selected ? '#fff' : '#111827',
+                        color: selected ? '#fff' : '#111',
                         borderColor: selected ? RED : '#e5e7eb',
                       }}
                     >
                       <span>{u.prenom} {u.nom}</span>
-                      <span style={{ fontSize: 12, opacity: .85 }}>#{u.idScout}</span>
+                      <span style={{ fontSize:12, opacity:.85 }}>#{u.idScout}</span>
                     </button>
                   );
                 })}
@@ -459,65 +448,81 @@ export default function GestionAffectation(): React.ReactElement | null {
           )}
         </div>
 
-        <div>
-          <List title="قائد الدورة">
-            {director.map(a => (
+        {/* ----------- LISTES PAR RÔLE ----------- */}
+        <List title={ROLE_LABEL.director}>
+          {directors.map(a => (
+            <Chip
+              key={a.user._id}
+              label={`${a.user.prenom} ${a.user.nom} — ${ROLE_LABEL[a.role]}`}
+              onRemove={() => removeUser(a.user._id)}
+            />
+          ))}
+          {!directors.length && <Empty>لم يتم إضافة قائد الدورة بعد</Empty>}
+        </List>
+
+        <List title={ROLE_LABEL.trainer}>
+          {trainers.map(a => (
+            <Chip
+              key={a.user._id}
+              label={`${a.user.prenom} ${a.user.nom} — ${ROLE_LABEL[a.role]}`}
+              onRemove={() => removeUser(a.user._id)}
+            />
+          ))}
+          {!trainers.length && <Empty>لم يتم إضافة المدربين بعد</Empty>}
+        </List>
+
+        <List title={ROLE_LABEL.assistant}>
+          {assistants.map(a => (
+            <Chip
+              key={a.user._id}
+              label={`${a.user.prenom} ${a.user.nom} — ${ROLE_LABEL[a.role]}`}
+              onRemove={() => removeUser(a.user._id)}
+            />
+          ))}
+          {!assistants.length && <Empty>لم يتم إضافة حاملي الشارة بعد</Empty>}
+        </List>
+
+        <List title={ROLE_LABEL.coach}>
+          {coaches.map(a => (
+            <Chip
+              key={a.user._id}
+              label={`${a.user.prenom} ${a.user.nom} — ${ROLE_LABEL[a.role]}`}
+              onRemove={() => removeUser(a.user._id)}
+            />
+          ))}
+          {!coaches.length && <Empty>لم يتم إضافة المرشد الفني بعد</Empty>}
+        </List>
+
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <List title={ROLE_LABEL.trainee}>
+            {trainees.map(a => (
               <Chip
                 key={a.user._id}
-                label={`${a.user.prenom} ${a.user.nom} — ${ROLE_LABEL[a.role]}`}
+                label={`${a.user.prenom} ${a.user.nom}`}
                 onRemove={() => removeUser(a.user._id)}
               />
             ))}
-            {!director.length && <Empty>لم يتم اضافة قيادة الدورة بعد</Empty>}
+            {!trainees.length && <Empty>لم يتم إضافة المتدربين بعد</Empty>}
           </List>
-
-          <List title="قيادة الدورة">
-            {trainers.map(a => (
-              <Chip
-                key={a.user._id}
-                label={`${a.user.prenom} ${a.user.nom} — ${ROLE_LABEL[a.role]}`}
-                onRemove={() => removeUser(a.user._id)}
-              />
-            ))}
-            {!trainers.length && <Empty>لم يتم اضافة قيادة الدورة بعد</Empty>}
-          </List>
-
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            <List title="المتدربون">
-              {trainees.map(a => (
-                <Chip
-                  key={a.user._id}
-                  label={`${a.user.prenom} ${a.user.nom}`}
-                  onRemove={() => removeUser(a.user._id)}
-                />
-              ))}
-              {!trainees.length && <Empty>لم يتم اضافة المتدربين بعد</Empty>}
-            </List>
-
-            {trainees.length > 0 && (
-              <button
-                type="button"
-                onClick={handleDeleteAllTrainees}
-                style={styles.dangerSmallBtn}
-              >
-                حذف جميع المتدربين
-              </button>
-            )}
-          </div>
         </div>
 
-        {loading && <div style={{ color:'#6b7280' }}>… جاري التحميل</div>}
+        {loading && <div style={{ color:'#666' }}>…جاري التحميل</div>}
         {err && <div style={{ color:'#b91c1c' }}>❌ {err}</div>}
 
+        {/* ACTIONS */}
         <div style={styles.actions}>
           <button
             type="button"
-            onClick={() => { sessionStorage.removeItem(STORE_KEY); nav('/moderator/gestionparticipant'); }}
+            onClick={() => {
+              sessionStorage.removeItem(STORE_KEY);
+              nav('/moderator/gestionparticipant');
+            }}
             disabled={saving}
             style={styles.pillGhost}
           >
             إلغاء
           </button>
+
           <button
             type="button"
             onClick={onSave}
@@ -532,7 +537,7 @@ export default function GestionAffectation(): React.ReactElement | null {
   );
 }
 
-/* ---- UI helpers ---- */
+/* --------- UI helpers --------- */
 function List({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ border:'1px solid #eef1f5', borderRadius:14, padding:12 }}>
@@ -541,120 +546,128 @@ function List({ title, children }: { title: string; children: React.ReactNode })
     </div>
   );
 }
-function Chip({ label, onRemove }: { label: string; onRemove: ()=>void }) {
+
+function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
     <div style={styles.chip}>
       <span>{label}</span>
-      <button onClick={onRemove} style={styles.chipX} title="إزالة">×</button>
+      <button onClick={onRemove} style={styles.chipX}>×</button>
     </div>
   );
 }
+
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div style={{ opacity:.65, padding:'6px 0' }}>{children}</div>;
+  return <div style={{ opacity:.65 }}>{children}</div>;
 }
 
 function PlusIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
+    <svg width="24" height="24" viewBox="0 0 24 24">
+      <path
+        d="M12 5v14M5 12h14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
+
 function ArrowRightIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24">
-      <path d="M8 5l8 7-8 7" fill="none" stroke="currentColor" strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M8 5l8 7-8 7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-/* ---- styles ---- */
+/* ----------- styles ----------- */
 const styles: Record<string, React.CSSProperties> = {
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginTop: 20,
-  },
-  toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 },
-  redLine: { height:3, background:RED, borderRadius:2, marginTop:8, marginBottom:8 },
-  pageTitle: { fontSize: 18, fontWeight: 800, color: '#1f2937', marginBottom: 100 },
+  toolbar: { display:'flex', justifyContent:'space-between', marginTop:20 },
+  toolbarRight: { display:'flex', alignItems:'center', gap:10 },
+  redLine: { height:3, background:RED, borderRadius:2, margin:'8px 0' },
+  pageTitle: { fontSize:18, fontWeight:800, color:'#1f2937', marginBottom:50 },
   card: {
-    background:'#fff', border:'1px solid #e9edf3', borderRadius:18,
-    boxShadow:'0 10px 24px rgba(0,0,0,.05)', padding:18, display:'grid', gap:12, maxWidth: 960
+    background:'#fff',
+    border:'1px solid #e9edf3',
+    borderRadius:18,
+    padding:18,
+    boxShadow:'0 10px 24px rgba(0,0,0,.05)',
+    display:'grid',
+    gap:20,
   },
-  label: { color:'#6b7280', fontSize:14, fontWeight:700 },
-  input: {
-    border:'1px solid #e5e7eb', borderRadius:12, padding:'10px 12px',
-    fontSize:16, outline:'none', width:400,
-  },
-  selection: {
-    border:'1px solid #e5e7eb', borderRadius:12, padding:'10px 12px', minWidth:200,
-    fontSize:16, outline:'none',
-  },
+  label: { fontSize:14, fontWeight:700, color:'#444' },
+  input: { border:'1px solid #e5e7eb', borderRadius:12, padding:'10px', width:400 },
+  selection: { border:'1px solid #e5e7eb', borderRadius:12, padding:'10px', minWidth:240 },
   dropdown: { border:'1px solid #e5e7eb', borderRadius:12, overflow:'hidden' },
-  suggestion: { width:'100%', textAlign:'right', padding:'10px 12px', border:0, cursor:'pointer' },
-
-  candidateWrap: {
-    display:'flex',
-    flexWrap:'wrap',
-    gap:8,
-    marginTop:10,
-  },
-
-  actions: { display:'flex', gap:10, justifyContent:'flex-end', marginTop:6 },
-
-  pillPrimary: {
-    padding:'10px 16px', borderRadius:999, border:`1px solid ${RED}`,
-    background: RED, color:'#fff', cursor:'pointer', fontWeight:700,
-  },
-  pillGhost: {
-    padding:'10px 16px', borderRadius:999, border:`1px solid ${RED}`,
-    background:'transparent', color:RED, cursor:'pointer', fontWeight:700,
-  },
-  pillPrimarySmall: {
-    padding:'6px 12px', borderRadius:999, border:`1px solid ${RED}`,
-    background: RED, color:'#fff', cursor:'pointer', fontWeight:700, fontSize:13,
-  },
-  pillGhostSmall: {
-    padding:'6px 12px', borderRadius:999, border:`1px solid ${RED}`,
-    background:'transparent', color:RED, cursor:'pointer', fontWeight:700, fontSize:13,
-  },
-  squareRedBtn: {
-    width: 46, height: 46, borderRadius: 14, background: 'transparent',
-    border: `3px solid ${RED}`, color: RED, display: 'grid', placeItems: 'center', cursor: 'pointer',
-  },
+  suggestion: { textAlign:'right', padding:'10px', border:0, cursor:'pointer' },
 
   chip: {
-    display:'flex', alignItems:'center', gap:8, padding:'6px 10px',
-    background:'#fff', border:'1px solid #e5e7eb', borderRadius:999,
-    boxShadow:'0 2px 8px rgba(0,0,0,.05)'
+    display:'flex', alignItems:'center', gap:8,
+    border:'1px solid #e5e7eb', borderRadius:999,
+    padding:'6px 10px',
   },
-  chipX: { border:0, background:'transparent', color:'#e11d48', fontSize:18, cursor:'pointer', lineHeight:1 },
-  circleRedBtn: {
-    width: 46, height: 46, borderRadius: 14, background: 'transparent',
-    border: `3px solid ${RED}`, color: RED, display: 'grid', placeItems: 'center', cursor: 'pointer',
+  chipX: {
+    border:0, background:'transparent',
+    color:'#e11d48', fontSize:20, cursor:'pointer'
   },
-  item: {
-    width: '97%', background: '#fff', borderRadius: 22, border: '1px solid #e9edf3',
-    boxShadow: '0 10px 24px rgba(0,0,0,.05)', padding: '16px 18px',
-    display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', minHeight: 78,
-  },
-  itemRight: { display: 'grid', justifyItems: 'start' },
-  itemTitle: { fontSize: 18, fontWeight: 200, color: '#374151' },
-  dangerSmallBtn: {
-    alignSelf: 'flex-start',
-    marginTop: 4,
-    padding: '6px 12px',
-    borderRadius: 999,
-    border: '1px solid #b91c1c',
-    background: '#fee2e2',
-    color: '#b91c1c',
+
+  candidateWrap: { display:'flex', flexWrap:'wrap', gap:8 },
+  actions: { display:'flex', justifyContent:'flex-end', gap:10 },
+
+ circleRedBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    background: 'transparent',
+    border: `3px solid ${RED}`,
+    color: RED,
+    display: 'grid',
+    placeItems: 'center',
     cursor: 'pointer',
-    fontWeight: 700,
-    fontSize: 13,
+  },
+
+  squareRedBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    background: 'transparent',
+    border: `3px solid ${RED}`,
+    color: RED,
+    display: 'grid',
+    placeItems: 'center',
+    cursor: 'pointer',
+  },
+
+  pillPrimary: {
+    padding:'10px 16px',
+    borderRadius:999,
+    background:RED,
+    color:'#fff',
+    border:`1px solid ${RED}`,
+  },
+
+  pillGhost: {
+    padding:'10px 16px',
+    borderRadius:999,
+    border:`1px solid ${RED}`,
+    background:'transparent',
+    color:RED,
+  },
+
+  pillPrimarySmall: {
+    padding:'6px 12px',
+    borderRadius:999,
+    background:RED,
+    color:'#fff',
+    border:`1px solid ${RED}`,
+    fontSize:13,
   },
 };
