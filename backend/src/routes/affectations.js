@@ -6,65 +6,31 @@ const FormationAffectation = require('../models/affectation');
 const User       = require('../models/user');
 const Demande    = require('../models/demande');
 const Formation  = require('../models/formation');
-const Evaluation = require('../models/evaluation');
-
+const Evaluation=require('../models/evaluation')
 const router = express.Router();
-
-/* ---------------- Utils ---------------- */
 
 function bad(req, res) {
   const e = validationResult(req);
   if (!e.isEmpty()) return res.status(400).json({ errors: e.array() });
   return null;
 }
-
 function rxFromQ(q) {
   if (!q) return null;
   const safe = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(safe, 'i');
 }
-
-/**
- * Normalisation forte (surtout pour l'arabe) :
- * - normalisation Unicode NFKC
- * - suppression des caractères zero-width / BOM
- * - suppression des harakat (tashkil)
- * - trim
- */
 function norm(v) {
   if (v == null) return '';
-
   return v
     .toString()
-    .normalize('NFKC')
-    // zero-width chars (ZWSP, ZWNJ, ZWJ, etc.) + BOM
-    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
-    // harakat / diacritiques arabes
-    .replace(/[\u0610-\u061A\u064B-\u065F\u06D6-\u06ED]/g, '')
+    .normalize('NFKC')                            // normalisation Unicode
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')  // zero-width / BOM
+    .replace(/[\u0610-\u061A\u064B-\u065F\u06D6-\u06ED]/g, '') // harakat
     .trim();
-}
-
-/**
- * Mappe un libellé de niveau vers un "code" métier stable,
- * pour éviter les problèmes de variantes Unicode.
- */
-function levelKey(v) {
-  const t = norm(v);
-  if (!t) return '';
-
-  // تمهيدية (peu importe les variantes autour de تمهيد)
-  if (t.includes('تمهيد')) return 'PREP';
-
-  // شارة خشبية
-  if (t.includes('شارة') && t.includes('خش')) return 'WOODBADGE';
-
-  // fallback : on renvoie la string normalisée
-  return t;
 }
 
 /* -------------------------------------------------------------
    GET /affectations/formations/:formationId/affectations
-   -> Récupérer les affectations existantes d'une formation
 ------------------------------------------------------------- */
 router.get(
   '/formations/:formationId/affectations',
@@ -140,14 +106,12 @@ router.get(
       }
 
       const payload = rows.map(r => {
-        if (!r.user) {
-          return {
-            _id: String(r._id),
-            role: r.role,
-            isPresent: !!r.isPresent,
-            user: null,
-          };
-        }
+        if (!r.user) return {
+          _id: String(r._id),
+          role: r.role,
+          isPresent: !!r.isPresent,
+          user: null,
+        };
 
         const uid = String(r.user._id);
         return {
@@ -175,10 +139,8 @@ router.get(
     }
   }
 );
-
 /* -------------------------------------------------------------
    GET /affectations/formations/:formationId/candidates
-   -> Candidats par rôle (director/trainer/assistant/coach/trainee)
 ------------------------------------------------------------- */
 router.get(
   '/formations/:formationId/candidates',
@@ -189,50 +151,29 @@ router.get(
     query('q').optional().isString(),
   ],
   async (req, res) => {
-    const e = bad(req, res);
+    const e = bad(req, res); 
     if (e) return;
 
     const { formationId } = req.params;
     const { role, q } = req.query;
     const re = rxFromQ(q);
 
+    // ---------- Formation de référence ----------
     const f = await Formation.findById(formationId)
       .select('session niveau branches')
       .lean();
     if (!f) return res.status(404).json({ error: 'Formation introuvable' });
 
-    const sessionId      = f.session;
-    const formLevelKey   = levelKey(f.niveau);
-    const formBranches   = (Array.isArray(f.branches) ? f.branches : []).map(norm);
+    const sessionId    = f.session;
+    const formLevel    = norm(f.niveau);                            // ex: "تمهيدية"
+    const formBranches = (Array.isArray(f.branches) ? f.branches : [])
+      .map(norm);                                                   // ex: ["أشبال"]
 
-    /* -------- IDs des trainees déjà affectés sur n'importe
-       quelle formation de la MÊME session -------- */
-
-    let alreadyTraineeIds = new Set(); // userIds
-
-    if (sessionId) {
-      // 1) Toutes les formations de cette session
-      const sameSessionFormations = await Formation.find({ session: sessionId })
-        .select('_id')
-        .lean();
-      const sameSessionFormationIds = sameSessionFormations.map(ff => ff._id);
-
-      if (sameSessionFormationIds.length) {
-        // 2) Toutes les affectations TRAINEE sur ces formations
-        const alreadyTrainee = await FormationAffectation.find({
-          formation: { $in: sameSessionFormationIds },
-          role: 'trainee',
-        })
-          .select('user')
-          .lean();
-
-        alreadyTraineeIds = new Set(
-          alreadyTrainee
-            .map(a => (a.user ? String(a.user) : null))
-            .filter(Boolean)
-        );
-      }
-    }
+    // ---------- Affectés à CETTE formation ----------
+    const already = await FormationAffectation.find({ formation: formationId })
+      .select('user role')
+      .lean();
+    const alreadyIds = new Set(already.map(a => String(a.user)));
 
     /* ------------------ DIRECTOR / COACH ------------------ */
     if (role === 'director' || role === 'coach') {
@@ -244,18 +185,21 @@ router.get(
           ]
         }
       };
-      if (re) match.$or = [
-        { email: re },
-        { idScout: re },
-        { nom: re },
-        { prenom: re },
-      ];
+      if (re) {
+        match.$or = [
+          { email: re },
+          { idScout: re },
+          { nom: re },
+          { prenom: re },
+        ];
+      }
 
       const users = await User.find(match)
         .select('_id prenom nom email idScout')
         .limit(50)
         .lean();
 
+      // ❗ pas d’exclusion ici (logique que tu voulais)
       return res.json(users.map(u => ({
         _id: String(u._id),
         prenom: u.prenom,
@@ -268,18 +212,21 @@ router.get(
     /* ------------------ TRAINER / ASSISTANT ------------------ */
     if (role === 'trainer' || role === 'assistant') {
       const match = {};
-      if (re) match.$or = [
-        { email: re },
-        { idScout: re },
-        { nom: re },
-        { prenom: re },
-      ];
+      if (re) {
+        match.$or = [
+          { email: re },
+          { idScout: re },
+          { nom: re },
+          { prenom: re },
+        ];
+      }
 
       const users = await User.find(match)
         .select('_id prenom nom email idScout')
         .limit(50)
         .lean();
 
+      // ❗ pas d’exclusion ici non plus
       return res.json(users.map(u => ({
         _id: String(u._id),
         prenom: u.prenom,
@@ -289,34 +236,88 @@ router.get(
       })));
     }
 
-    /* ------------------ TRAINEE ------------------ */
+    /* ------------------ TRAINEE (UX améliorée) ------------------ */
     if (role === 'trainee') {
+      // 1) Toutes les demandes APPROVED de la session
       const demandes = await Demande.find({
         session: sessionId,
         statusNational: 'APPROVED',
       })
         .select('_id applicant trainingLevel branche')
-        .populate({ path: 'applicant', select: '_id prenom nom email idScout' })
-        .limit(500)
+        .populate({ 
+          path: 'applicant', 
+          select: '_id prenom nom email idScout' 
+        })
         .lean();
 
+      console.log('[trainee] demandes trouvées =', demandes.length);
+
+      const formBranchesNorm = formBranches.map(norm); // déjà normées, mais safe
+
+      // 2) Trainees déjà affectés à une autre formation
+      //    de la même session + même niveau + même branche
+      const otherAffects = await FormationAffectation.find({
+        role: 'trainee',
+        formation: { $ne: formationId },   // autre formation
+      })
+        .select('user formation')
+        .populate({
+          path: 'formation',
+          select: 'session niveau branches',
+        })
+        .lean();
+
+      const excludeSameClusterIds = new Set();
+
+      for (const aff of otherAffects) {
+        const ff = aff.formation;
+        if (!ff) continue;
+
+        // même session
+        if (!ff.session || String(ff.session) !== String(sessionId)) continue;
+
+        // même niveau normalisé
+        if (norm(ff.niveau) !== formLevel) continue;
+
+        // mêmes branches (intersection)
+        const fb = (Array.isArray(ff.branches) ? ff.branches : []).map(norm);
+        if (!fb.length) continue;
+
+        const hasCommonBranch = fb.some(b => formBranchesNorm.includes(b));
+        if (!hasCommonBranch) continue;
+
+        // on exclut ce user : déjà affecté dans ce "cluster" session+niveau+branche
+        if (aff.user) {
+          excludeSameClusterIds.add(String(aff.user));
+        }
+      }
+
+      console.log('[trainee] excludeSameClusterIds size =', excludeSameClusterIds.size);
+
+      // 3) Filtrage final des demandes
       const filtered = demandes.filter(d => {
         const u = d.applicant;
         if (!u) return false;
 
         const uid = String(u._id);
 
-        // 🔴 NE PAS PROPOSER un trainee déjà affecté
-        // sur n'importe quelle formation de la même session
-        if (alreadyTraineeIds.has(uid)) return false;
+        // a) déjà affecté à CETTE formation
+        if (alreadyIds.has(uid)) return false;
 
-        // ✅ Niveau compatible (via code métier)
-        if (levelKey(d.trainingLevel) !== formLevelKey) return false;
+        // b) déjà affecté à une AUTRE formation
+        //    de la même session + niveau + branche
+        if (excludeSameClusterIds.has(uid)) return false;
 
-        // ✅ Branche compatible
-        if (formBranches.length && !formBranches.includes(norm(d.branche)))
-          return false;
+        // c) même niveau que la formation
+        if (norm(d.trainingLevel) !== formLevel) return false;
 
+        // d) même branche (si la formation a des branches définies)
+        if (formBranchesNorm.length) {
+          const b = norm(d.branche);
+          if (!b || !formBranchesNorm.includes(b)) return false;
+        }
+
+        // e) filtre texte (même si côté front tu n’envoies pas q pour trainee)
         if (re) {
           return (
             re.test(u.email || '') ||
@@ -329,28 +330,32 @@ router.get(
         return true;
       });
 
-      return res.json(filtered.map(d => ({
-        _id: String(d.applicant._id),
-        prenom: d.applicant.prenom,
-        nom: d.applicant.nom,
-        email: d.applicant.email,
-        idScout: d.applicant.idScout,
-      })));
+      console.log('[trainee] filtered =', filtered.length);
+
+      return res.json(
+        filtered.map(d => ({
+          _id: String(d.applicant._id),
+          prenom: d.applicant.prenom,
+          nom: d.applicant.nom,
+          email: d.applicant.email,
+          idScout: d.applicant.idScout,
+        }))
+      );
     }
+
   }
 );
 
+
 /* -------------------------------------------------------------
    POST /affectations/formations/:formationId/affectations/diff
-   -> Sauvegarde (upsert + delete) des affectations
 ------------------------------------------------------------- */
 router.post(
   '/formations/:formationId/affectations/diff',
   requireAuth,
   [param('formationId').isMongoId()],
   async (req, res) => {
-    const e = bad(req, res);
-    if (e) return;
+    const e = bad(req, res); if (e) return;
 
     const { formationId } = req.params;
     const { upserts = [], deletes = [] } = req.body || {};
@@ -360,9 +365,9 @@ router.post(
       .lean();
     if (!f) return res.status(404).json({ error: 'Formation introuvable' });
 
-    const sessionId      = f.session;
-    const formLevelKey   = levelKey(f.niveau);
-    const formBranches   = (Array.isArray(f.branches) ? f.branches : []).map(norm);
+    const sessionId    = f.session;
+    const formLevel    = norm(f.niveau);
+    const formBranches = (Array.isArray(f.branches) ? f.branches : []).map(norm);
 
     if (deletes.length) {
       await FormationAffectation.deleteMany({
@@ -390,6 +395,7 @@ router.post(
             error: `Niveau insuffisant pour rôle ${role}`,
           });
         }
+        // Pas de break → on laisse passer pour l'upsert
       }
 
       /** CONTRÔLE POUR trainee **/
@@ -407,24 +413,16 @@ router.post(
             error: 'Demande APPROVED introuvable pour cet utilisateur',
           });
         }
-
-        // ✅ Niveau compatible (via code métier)
-        if (levelKey(d.trainingLevel) !== formLevelKey) {
+        if (norm(d.trainingLevel) !== formLevel) {
           return res.status(400).json({
             error: 'Niveau de demande incompatible avec la formation',
           });
         }
-
-        // ✅ Branche compatible
         if (formBranches.length && !formBranches.includes(norm(d.branche))) {
           return res.status(400).json({
             error: 'Branche de demande incompatible',
           });
         }
-
-        // (Optionnel) tu pourrais ajouter ici un contrôle
-        // pour empêcher un même trainee d'être affecté
-        // à une autre formation de la même session.
       }
     }
 
@@ -443,9 +441,9 @@ router.post(
   }
 );
 
+
 /* -------------------------------------------------------------
    GET /affectations/mine-formations
-   -> Formations où je suis director/trainer/assistant/coach
 ------------------------------------------------------------- */
 router.get(
   '/mine-formations',
@@ -479,15 +477,25 @@ router.get(
         const fid = String(f._id);
         const current = byFormation.get(fid);
 
+        // rôle brut renvoyé par l'affectation
         const role = (row.role || '').toLowerCase();
 
+        // si on a déjà director, on ne descend jamais en dessous
         if (current && current.myRole === 'director') continue;
 
+        // 👇 JS pur, plus de typage TS ici
         let r = 'trainer';
-        if (role === 'director')      r = 'director';
-        else if (role === 'trainer')  r = 'trainer';
-        else if (role === 'assistant')r = 'assistant';
-        else if (role === 'coach')    r = 'coach';
+
+        if (role === 'director') {
+          r = 'director';
+        } else if (role === 'trainer') {
+          r = 'trainer';
+        } else if (role === 'assistant') {
+          r = 'assistant';
+        } else if (role === 'coach') {
+          // à toi de décider : soit 'coach', soit 'trainer'
+          r = 'coach';
+        }
 
         const session = f.session || {};
         const sessionId =
@@ -497,7 +505,7 @@ router.get(
         byFormation.set(fid, {
           formationId: fid,
           nom: f.nom || '',
-          myRole: r,
+          myRole: r, // 👈 ici tu auras bien 'assistant' quand l'affectation est assistant
           sessionTitle: session.title || '',
           startDate: session.startDate || f.startDate || null,
           endDate: session.endDate || f.endDate || null,
@@ -515,11 +523,9 @@ router.get(
   }
 );
 
-/** -----------------------------------------------------------
- * POST /affectations/trainee-presence
+/** POST /affectations/trainee-presence
  * Body: { items: [ { affectationId, isPresent }, ... ] }
- * -> coche/decoche la présence + initialise Evaluation si présent
- ----------------------------------------------------------- */
+ */
 router.post(
   '/trainee-presence',
   requireAuth,
@@ -613,5 +619,6 @@ router.post(
     }
   }
 );
+
 
 module.exports = router;
