@@ -25,7 +25,7 @@ function rxFromQ(q) {
 }
 
 /**
- * Normalisation "forte" pour les champs arabes :
+ * Normalisation forte (surtout pour l'arabe) :
  * - normalisation Unicode NFKC
  * - suppression des caractères zero-width / BOM
  * - suppression des harakat (tashkil)
@@ -44,8 +44,27 @@ function norm(v) {
     .trim();
 }
 
+/**
+ * Mappe un libellé de niveau vers un "code" métier stable,
+ * pour éviter les problèmes de variantes Unicode.
+ */
+function levelKey(v) {
+  const t = norm(v);
+  if (!t) return '';
+
+  // تمهيدية (peu importe les variantes autour de تمهيد)
+  if (t.includes('تمهيد')) return 'PREP';
+
+  // شارة خشبية
+  if (t.includes('شارة') && t.includes('خش')) return 'WOODBADGE';
+
+  // fallback : on renvoie la string normalisée
+  return t;
+}
+
 /* -------------------------------------------------------------
    GET /affectations/formations/:formationId/affectations
+   -> Récupérer les affectations existantes d'une formation
 ------------------------------------------------------------- */
 router.get(
   '/formations/:formationId/affectations',
@@ -159,6 +178,7 @@ router.get(
 
 /* -------------------------------------------------------------
    GET /affectations/formations/:formationId/candidates
+   -> Candidats par rôle (director/trainer/assistant/coach/trainee)
 ------------------------------------------------------------- */
 router.get(
   '/formations/:formationId/candidates',
@@ -169,7 +189,7 @@ router.get(
     query('q').optional().isString(),
   ],
   async (req, res) => {
-    const e = bad(req, res); 
+    const e = bad(req, res);
     if (e) return;
 
     const { formationId } = req.params;
@@ -181,14 +201,38 @@ router.get(
       .lean();
     if (!f) return res.status(404).json({ error: 'Formation introuvable' });
 
-    const sessionId    = f.session;
-    const formLevel    = norm(f.niveau);
-    const formBranches = (Array.isArray(f.branches) ? f.branches : []).map(norm);
+    const sessionId      = f.session;
+    const formLevelKey   = levelKey(f.niveau);
+    const formBranches   = (Array.isArray(f.branches) ? f.branches : []).map(norm);
 
-    const already = await FormationAffectation.find({ formation: formationId })
-      .select('user role')
-      .lean();
-    const alreadyIds = new Set(already.map(a => String(a.user)));
+    /* -------- IDs des trainees déjà affectés sur n'importe
+       quelle formation de la MÊME session -------- */
+
+    let alreadyTraineeIds = new Set(); // userIds
+
+    if (sessionId) {
+      // 1) Toutes les formations de cette session
+      const sameSessionFormations = await Formation.find({ session: sessionId })
+        .select('_id')
+        .lean();
+      const sameSessionFormationIds = sameSessionFormations.map(ff => ff._id);
+
+      if (sameSessionFormationIds.length) {
+        // 2) Toutes les affectations TRAINEE sur ces formations
+        const alreadyTrainee = await FormationAffectation.find({
+          formation: { $in: sameSessionFormationIds },
+          role: 'trainee',
+        })
+          .select('user')
+          .lean();
+
+        alreadyTraineeIds = new Set(
+          alreadyTrainee
+            .map(a => (a.user ? String(a.user) : null))
+            .filter(Boolean)
+        );
+      }
+    }
 
     /* ------------------ DIRECTOR / COACH ------------------ */
     if (role === 'director' || role === 'coach') {
@@ -253,20 +297,23 @@ router.get(
       })
         .select('_id applicant trainingLevel branche')
         .populate({ path: 'applicant', select: '_id prenom nom email idScout' })
-        .limit(300)
+        .limit(500)
         .lean();
 
       const filtered = demandes.filter(d => {
         const u = d.applicant;
         if (!u) return false;
 
-        // déjà affecté
-        if (alreadyIds.has(String(u._id))) return false;
+        const uid = String(u._id);
 
-        // contrôle niveau avec norm "fort"
-        if (norm(d.trainingLevel) !== formLevel) return false;
+        // 🔴 NE PAS PROPOSER un trainee déjà affecté
+        // sur n'importe quelle formation de la même session
+        if (alreadyTraineeIds.has(uid)) return false;
 
-        // contrôle branche éventuel
+        // ✅ Niveau compatible (via code métier)
+        if (levelKey(d.trainingLevel) !== formLevelKey) return false;
+
+        // ✅ Branche compatible
         if (formBranches.length && !formBranches.includes(norm(d.branche)))
           return false;
 
@@ -295,13 +342,14 @@ router.get(
 
 /* -------------------------------------------------------------
    POST /affectations/formations/:formationId/affectations/diff
+   -> Sauvegarde (upsert + delete) des affectations
 ------------------------------------------------------------- */
 router.post(
   '/formations/:formationId/affectations/diff',
   requireAuth,
   [param('formationId').isMongoId()],
   async (req, res) => {
-    const e = bad(req, res); 
+    const e = bad(req, res);
     if (e) return;
 
     const { formationId } = req.params;
@@ -312,9 +360,9 @@ router.post(
       .lean();
     if (!f) return res.status(404).json({ error: 'Formation introuvable' });
 
-    const sessionId    = f.session;
-    const formLevel    = norm(f.niveau);
-    const formBranches = (Array.isArray(f.branches) ? f.branches : []).map(norm);
+    const sessionId      = f.session;
+    const formLevelKey   = levelKey(f.niveau);
+    const formBranches   = (Array.isArray(f.branches) ? f.branches : []).map(norm);
 
     if (deletes.length) {
       await FormationAffectation.deleteMany({
@@ -360,18 +408,23 @@ router.post(
           });
         }
 
-        // contrôle niveau avec norm renforcé
-        if (norm(d.trainingLevel) !== formLevel) {
+        // ✅ Niveau compatible (via code métier)
+        if (levelKey(d.trainingLevel) !== formLevelKey) {
           return res.status(400).json({
             error: 'Niveau de demande incompatible avec la formation',
           });
         }
 
+        // ✅ Branche compatible
         if (formBranches.length && !formBranches.includes(norm(d.branche))) {
           return res.status(400).json({
             error: 'Branche de demande incompatible',
           });
         }
+
+        // (Optionnel) tu pourrais ajouter ici un contrôle
+        // pour empêcher un même trainee d'être affecté
+        // à une autre formation de la même session.
       }
     }
 
@@ -392,6 +445,7 @@ router.post(
 
 /* -------------------------------------------------------------
    GET /affectations/mine-formations
+   -> Formations où je suis director/trainer/assistant/coach
 ------------------------------------------------------------- */
 router.get(
   '/mine-formations',
@@ -461,9 +515,11 @@ router.get(
   }
 );
 
-/** POST /affectations/trainee-presence
+/** -----------------------------------------------------------
+ * POST /affectations/trainee-presence
  * Body: { items: [ { affectationId, isPresent }, ... ] }
- */
+ * -> coche/decoche la présence + initialise Evaluation si présent
+ ----------------------------------------------------------- */
 router.post(
   '/trainee-presence',
   requireAuth,
