@@ -6,20 +6,43 @@ const FormationAffectation = require('../models/affectation');
 const User       = require('../models/user');
 const Demande    = require('../models/demande');
 const Formation  = require('../models/formation');
-const Evaluation=require('../models/evaluation')
+const Evaluation = require('../models/evaluation');
+
 const router = express.Router();
+
+/* ---------------- Utils ---------------- */
 
 function bad(req, res) {
   const e = validationResult(req);
   if (!e.isEmpty()) return res.status(400).json({ errors: e.array() });
   return null;
 }
+
 function rxFromQ(q) {
   if (!q) return null;
   const safe = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(safe, 'i');
 }
-const norm = v => (v ?? '').toString().trim();
+
+/**
+ * Normalisation "forte" pour les champs arabes :
+ * - normalisation Unicode NFKC
+ * - suppression des caractères zero-width / BOM
+ * - suppression des harakat (tashkil)
+ * - trim
+ */
+function norm(v) {
+  if (v == null) return '';
+
+  return v
+    .toString()
+    .normalize('NFKC')
+    // zero-width chars (ZWSP, ZWNJ, ZWJ, etc.) + BOM
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+    // harakat / diacritiques arabes
+    .replace(/[\u0610-\u061A\u064B-\u065F\u06D6-\u06ED]/g, '')
+    .trim();
+}
 
 /* -------------------------------------------------------------
    GET /affectations/formations/:formationId/affectations
@@ -98,12 +121,14 @@ router.get(
       }
 
       const payload = rows.map(r => {
-        if (!r.user) return {
-          _id: String(r._id),
-          role: r.role,
-          isPresent: !!r.isPresent,
-          user: null,
-        };
+        if (!r.user) {
+          return {
+            _id: String(r._id),
+            role: r.role,
+            isPresent: !!r.isPresent,
+            user: null,
+          };
+        }
 
         const uid = String(r.user._id);
         return {
@@ -144,7 +169,8 @@ router.get(
     query('q').optional().isString(),
   ],
   async (req, res) => {
-    const e = bad(req, res); if (e) return;
+    const e = bad(req, res); 
+    if (e) return;
 
     const { formationId } = req.params;
     const { role, q } = req.query;
@@ -168,8 +194,10 @@ router.get(
     if (role === 'director' || role === 'coach') {
       const match = {
         $expr: {
-          $in: [{ $trim: { input: { $ifNull: ['$niveau',''] } } },
-          ['قائد تدريب','مساعد قائد تدريب']]
+          $in: [
+            { $trim: { input: { $ifNull: ['$niveau',''] } } },
+            ['قائد تدريب','مساعد قائد تدريب']
+          ]
         }
       };
       if (re) match.$or = [
@@ -179,9 +207,11 @@ router.get(
         { prenom: re },
       ];
 
-      const users = await User.find(match).select('_id prenom nom email idScout').limit(50).lean();
+      const users = await User.find(match)
+        .select('_id prenom nom email idScout')
+        .limit(50)
+        .lean();
 
-      // ❗ Pas d'exclusion ici (tu l'as demandé)
       return res.json(users.map(u => ({
         _id: String(u._id),
         prenom: u.prenom,
@@ -201,9 +231,11 @@ router.get(
         { prenom: re },
       ];
 
-      const users = await User.find(match).select('_id prenom nom email idScout').limit(50).lean();
+      const users = await User.find(match)
+        .select('_id prenom nom email idScout')
+        .limit(50)
+        .lean();
 
-      // ❗ Pas d'exclusion ici non plus
       return res.json(users.map(u => ({
         _id: String(u._id),
         prenom: u.prenom,
@@ -213,7 +245,7 @@ router.get(
       })));
     }
 
-    /* ------------------ TRAINEE (excludeIds appliqué) ------------------ */
+    /* ------------------ TRAINEE ------------------ */
     if (role === 'trainee') {
       const demandes = await Demande.find({
         session: sessionId,
@@ -228,9 +260,13 @@ router.get(
         const u = d.applicant;
         if (!u) return false;
 
-        if (alreadyIds.has(String(u._id))) return false; // exclusion
+        // déjà affecté
+        if (alreadyIds.has(String(u._id))) return false;
 
+        // contrôle niveau avec norm "fort"
         if (norm(d.trainingLevel) !== formLevel) return false;
+
+        // contrôle branche éventuel
         if (formBranches.length && !formBranches.includes(norm(d.branche)))
           return false;
 
@@ -265,7 +301,8 @@ router.post(
   requireAuth,
   [param('formationId').isMongoId()],
   async (req, res) => {
-    const e = bad(req, res); if (e) return;
+    const e = bad(req, res); 
+    if (e) return;
 
     const { formationId } = req.params;
     const { upserts = [], deletes = [] } = req.body || {};
@@ -305,7 +342,6 @@ router.post(
             error: `Niveau insuffisant pour rôle ${role}`,
           });
         }
-        // Pas de break → on laisse passer pour l'upsert
       }
 
       /** CONTRÔLE POUR trainee **/
@@ -323,11 +359,14 @@ router.post(
             error: 'Demande APPROVED introuvable pour cet utilisateur',
           });
         }
+
+        // contrôle niveau avec norm renforcé
         if (norm(d.trainingLevel) !== formLevel) {
           return res.status(400).json({
             error: 'Niveau de demande incompatible avec la formation',
           });
         }
+
         if (formBranches.length && !formBranches.includes(norm(d.branche))) {
           return res.status(400).json({
             error: 'Branche de demande incompatible',
@@ -350,7 +389,6 @@ router.post(
     return res.json({ ok: true });
   }
 );
-
 
 /* -------------------------------------------------------------
    GET /affectations/mine-formations
@@ -387,25 +425,15 @@ router.get(
         const fid = String(f._id);
         const current = byFormation.get(fid);
 
-        // rôle brut renvoyé par l'affectation
         const role = (row.role || '').toLowerCase();
 
-        // si on a déjà director, on ne descend jamais en dessous
         if (current && current.myRole === 'director') continue;
 
-        // 👇 JS pur, plus de typage TS ici
         let r = 'trainer';
-
-        if (role === 'director') {
-          r = 'director';
-        } else if (role === 'trainer') {
-          r = 'trainer';
-        } else if (role === 'assistant') {
-          r = 'assistant';
-        } else if (role === 'coach') {
-          // à toi de décider : soit 'coach', soit 'trainer'
-          r = 'coach';
-        }
+        if (role === 'director')      r = 'director';
+        else if (role === 'trainer')  r = 'trainer';
+        else if (role === 'assistant')r = 'assistant';
+        else if (role === 'coach')    r = 'coach';
 
         const session = f.session || {};
         const sessionId =
@@ -415,7 +443,7 @@ router.get(
         byFormation.set(fid, {
           formationId: fid,
           nom: f.nom || '',
-          myRole: r, // 👈 ici tu auras bien 'assistant' quand l'affectation est assistant
+          myRole: r,
           sessionTitle: session.title || '',
           startDate: session.startDate || f.startDate || null,
           endDate: session.endDate || f.endDate || null,
@@ -529,6 +557,5 @@ router.post(
     }
   }
 );
-
 
 module.exports = router;
