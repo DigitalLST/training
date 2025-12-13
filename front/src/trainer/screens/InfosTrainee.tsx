@@ -320,6 +320,10 @@ export default function InfosTrainee(): React.JSX.Element {
 
           const levelsToShow = getLevelsForFormation(f.nom);
           const isDirector = f.myRole === 'director'; // 👈 clef de la gestion de présence
+          function toYMD(d: Date) {return d.toISOString().slice(0, 10);}
+          const todayYmd = toYMD(new Date());
+          const startYmd = f?.startDate? toYMD(new Date(f.startDate)): null;
+          const canEditPresence =isDirector && startYmd !== null && todayYmd >= startYmd;
 
           const totalPages =
             list.length === 0 ? 1 : Math.ceil(list.length / PAGE_SIZE);
@@ -391,7 +395,7 @@ export default function InfosTrainee(): React.JSX.Element {
                           </>
                         )}
 
-                        {isDirector && (
+                        {canEditPresence && (
                           <button
                             onClick={() => onSavePresence(fid)}
                             style={styles.refreshBtn}
@@ -452,7 +456,7 @@ export default function InfosTrainee(): React.JSX.Element {
                                     <td style={styles.td}>{u.region || '—'}</td>
                                     <td style={styles.td}>{u.email || '—'}</td>
                                     <td style={styles.td}>
-                                      {isDirector ? (
+                                      {canEditPresence ? (
                                         <input
                                           type="checkbox"
                                           checked={!!u.isPresent}
