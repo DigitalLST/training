@@ -49,6 +49,7 @@ import AdminHome from './admin/screens/AdminHome';
 import GestionAdmins from './admin/screens/ManageAdmins';
 import GestionUsers from './admin/screens/ManageUsers';
 import AdminUpdateEval from './admin/screens/UpdateEval';
+import AdminResultsValidation from './admin/screens/َApprobationResultat';
 
 export default function App() {
   return (
@@ -140,6 +141,8 @@ export default function App() {
           <Route path="gestionadmin" element={<GestionAdmins />} />
           <Route path="gestionbd" element={<GestionUsers />} />
           <Route path="updateeval" element={<AdminUpdateEval />} />
+          <Route path="resultat" element={<AdminResultsValidation />} />
+
 
         </Route> 
       </Route>  

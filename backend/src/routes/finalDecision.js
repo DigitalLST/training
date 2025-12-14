@@ -1,4 +1,4 @@
-// routes/finalDecisions.js (ou final-decisions.js)
+// routes/finalDecisions.js
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 
@@ -8,10 +8,9 @@ const Evaluation = require('../models/evaluation');
 const Formation = require('../models/formation');
 const SessionAffectation = require('../models/affectation');
 const FormationReport = require('../models/formationReport');
+const Session = require('../models/session'); // ✅ AJOUT
 
-const User = require('../models/user'); 
-const { generateFinalResultsPdf } = require('../services/pdf');// si tu en as besoin ailleurs
-
+const { generateFinalResultsPdf } = require('../services/pdf');
 
 const router = express.Router();
 
@@ -28,17 +27,48 @@ function computeTotals(ev) {
   if (!ev || !Array.isArray(ev.items)) {
     return { totalNote: 0, totalMax: 0, pct: 0 };
   }
-  const totalMax = ev.items.reduce(
-    (sum, it) => sum + (Number(it.maxnote) || 0),
-    0
-  );
-  const totalNote = ev.items.reduce(
-    (sum, it) => sum + (Number(it.note) || 0),
-    0
-  );
-  const pct =
-    totalMax > 0 ? Math.round((totalNote / totalMax) * 1000) / 10 : 0;
+  const totalMax = ev.items.reduce((sum, it) => sum + (Number(it.maxnote) || 0), 0);
+  const totalNote = ev.items.reduce((sum, it) => sum + (Number(it.note) || 0), 0);
+  const pct = totalMax > 0 ? Math.round((totalNote / totalMax) * 1000) / 10 : 0;
   return { totalNote, totalMax, pct };
+}
+
+/**
+ * ⚠️ Validateurs = director + trainer uniquement
+ * On calcule l'équipe "coreTeam" (validateurs) pour décider du status
+ */
+async function getCoreTeamUserIds(formationId) {
+  const teamAffects = await SessionAffectation.find({
+    formation: formationId,
+    role: { $in: ['director', 'trainer'] },
+  })
+    .select('user role')
+    .lean();
+
+  const ids = teamAffects
+    .map(a => (a.user ? String(a.user) : null))
+    .filter(Boolean);
+
+  return ids;
+}
+
+/**
+ * ✅ Applique la logique de validation "comme evaluation"
+ * - si coreTeam = [director] uniquement => validated dès que director approuve
+ * - sinon validated quand tous les users du coreTeam ont approuvé
+ */
+function computeStatusForApprovals(coreTeamUserIds, approvals) {
+  const approvedUserIds = (approvals || [])
+    .filter(a => ['director', 'trainer'].includes(a.role))
+    .map(a => String(a.user));
+
+  // aucun validateur -> on reste draft (cas anormal)
+  if (!coreTeamUserIds.length) return { status: 'draft', allApproved: false };
+
+  const allApproved = coreTeamUserIds.every(uid => approvedUserIds.includes(uid));
+
+  if (allApproved) return { status: 'validated', allApproved: true };
+  return { status: 'pending_team', allApproved: false };
 }
 
 /* ----------- préparation des données du report ----------- */
@@ -53,6 +83,44 @@ async function buildFinalResultsReportData(formationId) {
     const err = new Error('Formation introuvable');
     err.statusCode = 404;
     throw err;
+  }
+
+  // ✅ 1.b) CN validations (president + commissioner) depuis Session.validations
+  let cnPresident = null;
+  let cnCommissioner = null;
+
+  const sessionId = formation.session?._id || formation.session;
+  if (sessionId) {
+    const sessionDoc = await Session.findById(sessionId)
+      .select('validations')
+      .populate('validations.president.validatedBy', 'prenom nom signatureUrl')
+      .populate('validations.commissioner.validatedBy', 'prenom nom signatureUrl')
+      .lean();
+
+    const pres = sessionDoc?.validations?.president || null;
+    const comm = sessionDoc?.validations?.commissioner || null;
+
+    if (pres?.isValidated && pres?.validatedBy) {
+      cnPresident = {
+        role: 'cn_president',
+        roleLabel: 'رئيس اللجنة الوطنية',
+        prenom: pres.validatedBy?.prenom || '',
+        nom: pres.validatedBy?.nom || '',
+        validatedAt: pres.validatedAt || null,
+        signatureUrl: pres.validatedBy?.signatureUrl || null,
+      };
+    }
+
+    if (comm?.isValidated && comm?.validatedBy) {
+      cnCommissioner = {
+        role: 'cn_commissioner',
+        roleLabel: 'القائد العام',
+        prenom: comm.validatedBy?.prenom || '',
+        nom: comm.validatedBy?.nom || '',
+        validatedAt: comm.validatedAt || null,
+        signatureUrl: comm.validatedBy?.signatureUrl || null,
+      };
+    }
   }
 
   // 2) Affectations trainees (pour participants / présents)
@@ -132,14 +200,14 @@ async function buildFinalResultsReportData(formationId) {
     if (!t) continue;
     const traineeId = t._id ? String(t._id) : String(t);
 
-    // garder uniquement ceux qui ont une évaluation (== évalués)
+    // garder uniquement ceux qui ont une évaluation validée (== évalués)
     const evalForT = evalByTraineeId.get(traineeId);
     if (!evalForT) continue;
 
     const totals = computeTotals(evalForT);
 
     const affect = affectByUserId.get(traineeId) || {};
-    const decision = fd.decision || null; // 'success' | 'retake' | 'incompatible' | null
+    const decision = fd.decision || null;
 
     if (decision === 'success') successCount++;
     if (decision === 'retake') retakeCount++;
@@ -156,11 +224,11 @@ async function buildFinalResultsReportData(formationId) {
       totalMax: totals.totalMax,
       pct: totals.pct,
       decision,
-      evaluation: evalForT, // utile pour la page individuelle (critères)
+      evaluation: evalForT,
     });
   }
 
-  // 6) Équipe de direction (director + trainer + assistant + coach) depuis SessionAffectation
+  // 6) Équipe de direction (report) = director + trainer + assistant + coach
   const teamAffects = await SessionAffectation.find({
     formation: formationId,
     role: { $in: ['director', 'trainer', 'assistant', 'coach'] },
@@ -168,29 +236,21 @@ async function buildFinalResultsReportData(formationId) {
     .populate({ path: 'user', select: 'prenom nom signatureUrl' })
     .lean();
 
-  // approvals par user
-  const approvalsByUser = new Map(); // userId -> { hasApproved, lastApprovedAt, signatureUrl }
-
+  // approvals par user (pour "hasApproved" dans report)
+  const approvalsByUser = new Map(); // userId -> { hasApproved, lastApprovedAt }
   for (const fd of decisionsDocs) {
-    for (const ap of fd.approvals || []) {
+    for (const ap of (fd.approvals || [])) {
       const uid = ap.user ? String(ap.user._id || ap.user) : null;
       if (!uid) continue;
 
       const prev = approvalsByUser.get(uid) || {
         hasApproved: false,
         lastApprovedAt: null,
-        signatureUrl: null,
       };
 
-      const currentDate = ap.approvedAt ? new Date(ap.approvedAt) : null;
-      if (currentDate) {
-        if (!prev.lastApprovedAt || currentDate > prev.lastApprovedAt) {
-          prev.lastApprovedAt = currentDate;
-        }
-      }
-
-      if (ap.signatureUrl) {
-        prev.signatureUrl = ap.signatureUrl;
+      const d = ap.approvedAt ? new Date(ap.approvedAt) : null;
+      if (d && (!prev.lastApprovedAt || d > prev.lastApprovedAt)) {
+        prev.lastApprovedAt = d;
       }
 
       prev.hasApproved = true;
@@ -198,53 +258,46 @@ async function buildFinalResultsReportData(formationId) {
     }
   }
 
-  const team = [];
-  let validationDate = null;
-
-  for (const a of teamAffects) {
+  const team = teamAffects.map(a => {
     const u = a.user || {};
     const uid = u._id ? String(u._id) : String(a.user);
-
     const info = approvalsByUser.get(uid) || {
       hasApproved: false,
       lastApprovedAt: null,
-      signatureUrl: null,
     };
 
-    if (info.lastApprovedAt) {
-      if (!validationDate || info.lastApprovedAt > validationDate) {
-        validationDate = info.lastApprovedAt;
-      }
-    }
-
-    team.push({
+    return {
       userId: uid,
       prenom: u.prenom || '',
       nom: u.nom || '',
-      role: a.role, // 'director' | 'trainer' | 'assistant' | 'coach'
-      hasApproved: info.hasApproved,
-      lastApprovedAt: info.lastApprovedAt
-        ? info.lastApprovedAt.toISOString()
-        : null,
+      role: a.role,
+      hasApproved: !!info.hasApproved,
+      lastApprovedAt: info.lastApprovedAt ? info.lastApprovedAt.toISOString() : null,
       signatureUrl: u.signatureUrl || null,
-    });
-  }
+    };
+  });
 
-  const anyTrainerApproved = team.some(
-    m => m.role === 'trainer' && m.hasApproved
-  );
-  const allTeamApproved =
-    team.length > 0 && team.every(m => m.hasApproved);
+  // ✅ meta validation basée uniquement sur director+trainer
+  const coreTeam = team.filter(m => m.role === 'director' || m.role === 'trainer');
+  const anyTrainerApproved = coreTeam.some(m => m.role === 'trainer' && m.hasApproved);
+  const allTeamApproved = coreTeam.length > 0 && coreTeam.every(m => m.hasApproved);
+
+  // date de validation = max approvedAt parmi coreTeam
+  let validationDate = null;
+  for (const m of coreTeam) {
+    if (!m.lastApprovedAt) continue;
+    const d = new Date(m.lastApprovedAt);
+    if (!validationDate || d > validationDate) validationDate = d;
+  }
 
   // 7) % success global (par rapport aux présents)
   const successPct =
     totalPresent > 0 ? Math.round((successCount / totalPresent) * 1000) / 10 : 0;
 
-  // 8) Director principal (on prend le premier role=director)
+  // 8) Director principal
   const director = team.find(m => m.role === 'director') || null;
 
   // 9) Rapports director / coach
-  //  - si tu veux vraiment "signés seulement", ajoute un filtre { signedAt: { $ne: null } }
   const directorReportDoc = await FormationReport.findOne({
     formation: formationId,
     role: 'director',
@@ -305,7 +358,7 @@ async function buildFinalResultsReportData(formationId) {
         }
       : null,
     director,
-    trainees: traineesRows, // seulement ceux qui ont une évaluation
+    trainees: traineesRows,
     stats: {
       totalParticipants,
       totalPresent,
@@ -315,18 +368,20 @@ async function buildFinalResultsReportData(formationId) {
       successPct,
       validationDate: validationDate ? validationDate.toISOString() : null,
     },
-    team, // pour signatures & rôles
+    team, // équipe complète (même non validateurs)
     directorReport,
     coachReport,
-    decisionsRaw: decisionsDocs, // si besoin debug
+    decisionsRaw: decisionsDocs,
     meta: {
       anyTrainerApproved,
-      allTeamApproved,
+      allTeamApproved, // basé sur coreTeam (director+trainer)
     },
+
+    // ✅ AJOUT: CN validations
+    cnPresident,
+    cnCommissioner,
   };
 }
-
-
 
 /* ----------------- GET /report-data ----------------- */
 
@@ -344,17 +399,11 @@ router.get(
       const data = await buildFinalResultsReportData(formationId);
       return res.json(data);
     } catch (err) {
-      console.error(
-        'GET /final-decisions/formations/:formationId/report-data ERROR',
-        err
-      );
+      console.error('GET /final-decisions/formations/:formationId/report-data ERROR', err);
       const status = err.statusCode || 500;
-      return res
-        .status(status)
-        .json({
-          message:
-            err.message || 'Erreur lors de la préparation du report.',
-        });
+      return res.status(status).json({
+        message: err.message || 'Erreur lors de la préparation du report.',
+      });
     }
   }
 );
@@ -363,7 +412,6 @@ router.get(
 /**
  * POST /api/final-decisions/formations/:formationId
  * Body: { decisions: [{ traineeId, decision }] }
- * decision ∈ ['success','retake','incompatible']
  */
 router.post(
   '/formations/:formationId',
@@ -379,15 +427,8 @@ router.post(
     const allowed = ['success', 'retake', 'incompatible'];
 
     try {
-      const formation = await Formation.findById(formationId)
-        .select('_id session')
-        .lean();
-
-      if (!formation) {
-        return res
-          .status(404)
-          .json({ message: 'Formation introuvable' });
-      }
+      const formation = await Formation.findById(formationId).select('_id session').lean();
+      if (!formation) return res.status(404).json({ message: 'Formation introuvable' });
 
       const sessionId = formation.session;
       const meId = (req.user && (req.user.id || req.user._id)) || null;
@@ -403,26 +444,22 @@ router.post(
         isDirector = !!myAff;
       }
 
+      // ✅ coreTeam validateurs
+      const coreTeamUserIds = await getCoreTeamUserIds(formationId);
+
       const resultDocs = [];
 
       for (const d of decisions) {
-        if (!d.traineeId || !allowed.includes(d.decision)) {
-          continue;
-        }
+        if (!d.traineeId || !allowed.includes(d.decision)) continue;
 
-        // 1) évaluation (validated)
         const evaluation = await Evaluation.findOne({
           session: sessionId,
           formation: formationId,
           trainee: d.traineeId,
           status: 'validated',
         }).lean();
+        if (!evaluation) continue;
 
-        if (!evaluation) {
-          continue;
-        }
-
-        // 2) affectation du stagiaire
         const traineeAff = await SessionAffectation.findOne({
           formation: formationId,
           user: d.traineeId,
@@ -430,15 +467,9 @@ router.post(
         })
           .select('_id')
           .lean();
+        if (!traineeAff) continue;
 
-        if (!traineeAff) {
-          continue;
-        }
-
-        // 3) totaux
         const { totalNote, totalMax } = computeTotals(evaluation);
-
-        // 4) upsert FinalDecision
         const now = new Date();
 
         const updateSet = {
@@ -448,20 +479,30 @@ router.post(
           decision: d.decision,
           validatedBy: null,
           validatedAt: null,
+          status: 'draft',
+          approvals: [],
         };
 
+        // ✅ si director saisit : on démarre le workflow
         if (isDirector && meId) {
-          updateSet.status = 'pending_team';
-          updateSet.approvals = [
+          const approvals = [
             {
               user: meId,
               role: 'director',
               approvedAt: now,
             },
           ];
-        } else {
-          updateSet.status = 'draft';
-          updateSet.approvals = [];
+
+          // ✅ règle : si coreTeam = director only => validated direct
+          const { status } = computeStatusForApprovals(coreTeamUserIds, approvals);
+
+          updateSet.status = status;
+          updateSet.approvals = approvals;
+
+          if (status === 'validated') {
+            updateSet.validatedBy = meId;
+            updateSet.validatedAt = now;
+          }
         }
 
         const fd = await FinalDecision.findOneAndUpdate(
@@ -478,10 +519,7 @@ router.post(
       }
 
       if (!resultDocs.length) {
-        return res.status(400).json({
-          message:
-            'Aucune décision finale valide à enregistrer.',
-        });
+        return res.status(400).json({ message: 'Aucune décision finale valide à enregistrer.' });
       }
 
       return res.json({
@@ -490,13 +528,8 @@ router.post(
         finalDecisions: resultDocs,
       });
     } catch (err) {
-      console.error(
-        'POST /final-decisions/formations/:formationId ERROR',
-        err
-      );
-      return res
-        .status(500)
-        .json({ message: 'Erreur serveur' });
+      console.error('POST /final-decisions/formations/:formationId ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur' });
     }
   }
 );
@@ -518,22 +551,10 @@ router.post(
       const { formation, traineeId } = req.body;
       const meId = (req.user && (req.user.id || req.user._id)) || null;
 
-      if (!meId) {
-        return res
-          .status(401)
-          .json({ message: 'Utilisateur non authentifié.' });
-      }
+      if (!meId) return res.status(401).json({ message: 'Utilisateur non authentifié.' });
 
-      // formation -> session
-      const f = await Formation.findById(formation)
-        .select('_id session')
-        .lean();
-
-      if (!f) {
-        return res
-          .status(404)
-          .json({ message: 'Formation introuvable' });
-      }
+      const f = await Formation.findById(formation).select('_id session').lean();
+      if (!f) return res.status(404).json({ message: 'Formation introuvable' });
 
       const sessionId = f.session;
 
@@ -546,8 +567,7 @@ router.post(
 
       if (!myAffectation) {
         return res.status(403).json({
-          message:
-            "Vous devez faire partie de l’équipe de direction pour valider la décision finale.",
+          message: "Vous devez faire partie de l’équipe de direction pour valider la décision finale.",
         });
       }
 
@@ -558,10 +578,7 @@ router.post(
       });
 
       if (!finalDecision) {
-        return res.status(404).json({
-          message:
-            'Décision finale introuvable pour ce stagiaire.',
-        });
+        return res.status(404).json({ message: 'Décision finale introuvable pour ce stagiaire.' });
       }
 
       // s'assurer qu'il y a une affectation
@@ -576,14 +593,14 @@ router.post(
 
         if (!traineeAff) {
           return res.status(400).json({
-            message:
-              "Impossible de trouver l'affectation du stagiaire pour cette formation.",
+            message: "Impossible de trouver l'affectation du stagiaire pour cette formation.",
           });
         }
 
         finalDecision.affectation = traineeAff._id;
       }
 
+      // add approval si pas déjà
       const already = (finalDecision.approvals || []).find(
         a => a.user.toString() === meId.toString()
       );
@@ -596,48 +613,32 @@ router.post(
         });
       }
 
-      if (finalDecision.status === 'draft') {
-        finalDecision.status = 'pending_team';
-      }
+      // ✅ coreTeam validateurs
+      const coreTeamUserIds = await getCoreTeamUserIds(formation);
 
-      // équipe de direction
-      const teamAffects = await SessionAffectation.find({
-        formation,
-        role: { $in: ['director', 'trainer'] },
-      })
-        .select('user role')
-        .lean();
-
-      const teamUserIds = teamAffects.map(a => String(a.user));
-      const approvedUserIds = (finalDecision.approvals || [])
-        .filter(a =>
-          ['director', 'trainer'].includes(a.role)
-        )
-        .map(a => String(a.user));
-
-      const allApproved = teamUserIds.every(uid =>
-        approvedUserIds.includes(uid)
+      // ✅ compute status
+      const { status, allApproved } = computeStatusForApprovals(
+        coreTeamUserIds,
+        finalDecision.approvals
       );
 
-      if (teamUserIds.length > 0 && allApproved) {
-        finalDecision.status = 'validated';
+      finalDecision.status = status;
+
+      if (allApproved) {
         finalDecision.validatedBy = meId;
         finalDecision.validatedAt = new Date();
-      } else if (finalDecision.status === 'draft') {
-        finalDecision.status = 'pending_team';
+      } else {
+        finalDecision.validatedBy = null;
+        finalDecision.validatedAt = null;
       }
 
       await finalDecision.save();
 
       return res.json({ finalDecision });
     } catch (err) {
-      console.error(
-        'POST /final-decisions/approve ERROR',
-        err
-      );
+      console.error('POST /final-decisions/approve ERROR', err);
       return res.status(500).json({
-        message:
-          'Erreur serveur lors de la validation de la décision finale.',
+        message: 'Erreur serveur lors de la validation de la décision finale.',
       });
     }
   }
@@ -679,56 +680,31 @@ router.get(
 
       // statut global de la formation
       let formationStatus = 'draft';
-
       if (docs.length > 0) {
-        if (docs.every(fd => fd.status === 'validated')) {
-          formationStatus = 'validated';
-        } else if (
-          docs.some(
-            fd =>
-              fd.status === 'pending_team' ||
-              fd.status === 'validated'
-          )
-        ) {
+        if (docs.every(fd => fd.status === 'validated')) formationStatus = 'validated';
+        else if (docs.some(fd => fd.status === 'pending_team' || fd.status === 'validated'))
           formationStatus = 'pending_team';
-        } else {
-          formationStatus = 'draft';
-        }
+        else formationStatus = 'draft';
       }
 
-      // équipe
+      // équipe validateurs only (director/trainer)
       const teamAffects = await SessionAffectation.find({
         formation: formationId,
         role: { $in: ['director', 'trainer'] },
       })
         .select('user role')
-        .populate({
-          path: 'user',
-          select: '_id prenom nom',
-        })
+        .populate({ path: 'user', select: '_id prenom nom' })
         .lean();
 
       const approvalsByUser = new Map(); // userId -> { hasApproved, lastApprovedAt }
-
       for (const fd of docs) {
-        for (const ap of fd.approvals || []) {
+        for (const ap of (fd.approvals || [])) {
           const uid = String(ap.user);
-          const prev = approvalsByUser.get(uid) || {
-            hasApproved: false,
-            lastApprovedAt: null,
-          };
+          const prev = approvalsByUser.get(uid) || { hasApproved: false, lastApprovedAt: null };
 
-          const currentDate = ap.approvedAt
-            ? new Date(ap.approvedAt)
-            : null;
-
-          if (currentDate) {
-            if (
-              !prev.lastApprovedAt ||
-              currentDate > prev.lastApprovedAt
-            ) {
-              prev.lastApprovedAt = currentDate;
-            }
+          const currentDate = ap.approvedAt ? new Date(ap.approvedAt) : null;
+          if (currentDate && (!prev.lastApprovedAt || currentDate > prev.lastApprovedAt)) {
+            prev.lastApprovedAt = currentDate;
           }
 
           prev.hasApproved = true;
@@ -739,28 +715,19 @@ router.get(
       const team = teamAffects.map(a => {
         const u = a.user || {};
         const uid = u._id ? String(u._id) : String(a.user);
-        const info = approvalsByUser.get(uid) || {
-          hasApproved: false,
-          lastApprovedAt: null,
-        };
-
+        const info = approvalsByUser.get(uid) || { hasApproved: false, lastApprovedAt: null };
         return {
           userId: uid,
           prenom: u.prenom || '',
           nom: u.nom || '',
           role: a.role,
           hasApproved: !!info.hasApproved,
-          lastApprovedAt: info.lastApprovedAt
-            ? info.lastApprovedAt.toISOString()
-            : null,
+          lastApprovedAt: info.lastApprovedAt ? info.lastApprovedAt.toISOString() : null,
         };
       });
 
-      const allTeamApproved =
-        team.length > 0 && team.every(m => m.hasApproved);
-      const anyTrainerApproved = team.some(
-        m => m.role === 'trainer' && m.hasApproved
-      );
+      const allTeamApproved = team.length > 0 && team.every(m => m.hasApproved);
+      const anyTrainerApproved = team.some(m => m.role === 'trainer' && m.hasApproved);
 
       let currentUserHasApproved = false;
       if (meId) {
@@ -777,25 +744,15 @@ router.get(
         formationStatus,
       });
     } catch (err) {
-      console.error(
-        'GET /final-decisions/formations/:formationId ERROR',
-        err
-      );
+      console.error('GET /final-decisions/formations/:formationId ERROR', err);
       return res.status(500).json({
-        message:
-          'Erreur serveur lors de la lecture des décisions.',
+        message: 'Erreur serveur lors de la lecture des décisions.',
       });
     }
   }
 );
 
 /* ----------------- GET /formations/:formationId/report (PDF) ----------------- */
-/**
- * Génère le PDF "بطاقة النتائج" avec pdfmake via services/pdf.js
- */
-
-
-// ...
 
 router.get(
   '/formations/:formationId/report',
@@ -814,25 +771,14 @@ router.get(
       const pdfBuffer = await generateFinalResultsPdf(data);
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${encodeURIComponent(filename)}"`
-      );
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
 
       return res.end(pdfBuffer);
     } catch (err) {
-      console.error(
-        'GET /final-decisions/formations/:formationId/report ERROR',
-        err
-      );
-      return res.status(500).json({
-        message: 'Erreur serveur lors de la génération du PDF.',
-      });
+      console.error('GET /final-decisions/formations/:formationId/report ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur lors de la génération du PDF.' });
     }
   }
 );
-
-
-
 
 module.exports = router;

@@ -3,8 +3,8 @@ import React from 'react';
 
 const CARDS = [
   { label: 'إدارة المستخدمين',       to: '/admin/gestionadmin', activeFor: ['/admin/gestionadmin']  },
-  { label: 'إدارة المسجلين',       to: '/admin/gestionbd', activeFor: ['/admin/gestionbd']  },
- // { label: 'إدارة الدراسات التدريبية ',    to: '/admin/gestionformations', activeFor: ['/admin/gestionformations']    },
+  { label: 'إدارة المسجلين',       to: '/admin/gestionbd', activeFor: ['/admin/gestionbd','/admin/updateval']  },
+  { label: 'النتائج النهائية',    to: '/admin/resultat', activeFor: ['/admin/resultat']    },
 
 ];
 

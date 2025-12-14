@@ -243,10 +243,10 @@ router.get(
   }
 );
 
-/* ============================================================
- * 2) POST /evaluations/trainee
- *    → Saisie / mise à jour des notes par le directeur
- * ============================================================*/
+// ============================================================
+// 2) POST /evaluations/trainee
+//    → Saisie / mise à jour des notes par le directeur
+// ============================================================
 router.post(
   '/trainee',
   requireAuth,
@@ -264,6 +264,7 @@ router.post(
     const { session, formation, traineeId, items } = req.body || {};
 
     try {
+      // 🔐 Seul le director peut saisir les notes
       const myAff = await SessionAffectation.findOne({
         formation,
         user: userId,
@@ -278,6 +279,7 @@ router.post(
           .json({ error: 'Seul قائد الدورة peut saisir les notes.' });
       }
 
+      // 🔍 Affectation du stagiaire
       const traineeAff = await SessionAffectation.findOne({
         formation,
         user: traineeId,
@@ -300,7 +302,8 @@ router.post(
         maxnote: it.maxnote != null ? Number(it.maxnote) : undefined,
       }));
 
-      const evaluation = await Evaluation.findOneAndUpdate(
+      // 🔎 1) On enregistre l’évaluation + approval du director
+      let evaluation = await Evaluation.findOneAndUpdate(
         { session, formation, trainee: traineeId },
         {
           $set: {
@@ -319,6 +322,64 @@ router.post(
         },
         { new: true, upsert: true, setDefaultsOnInsert: true }
       );
+
+      // 🔁 2) On récupère l’équipe (director + trainers)
+      const teamAffects = await SessionAffectation.find({
+        formation,
+        role: { $in: ['director', 'trainer'] },
+      })
+        .select('user role')
+        .lean();
+
+      const teamUserIds = teamAffects.map(a => String(a.user));
+      const approvedUserIds = (evaluation.approvals || [])
+        .filter(a => ['director', 'trainer'].includes(a.role))
+        .map(a => String(a.user));
+
+      const allApproved =
+        teamUserIds.length > 0 &&
+        teamUserIds.every(uid => approvedUserIds.includes(uid));
+
+      if (allApproved) {
+        evaluation.status = 'validated';
+        evaluation.validatedBy = userId;
+        evaluation.validatedAt = new Date();
+        await evaluation.save();
+
+        // 🧮 3) Si TOUS les stagiaires présents sont validés,
+        // on initialise les FinalDecision (même logique que dans /trainee/approve)
+        try {
+          const presentAffects = await SessionAffectation.find({
+            formation,
+            role: 'trainee',
+            isPresent: true,
+          })
+            .select('user')
+            .lean();
+
+          const traineeIds = presentAffects
+            .map(a => a.user)
+            .filter(Boolean);
+
+          if (traineeIds.length) {
+            const validatedCount = await Evaluation.countDocuments({
+              session,
+              formation,
+              trainee: { $in: traineeIds },
+              status: 'validated',
+            });
+
+            if (validatedCount === traineeIds.length) {
+              await initFinalDecisionsForFormation(session, formation, traineeIds);
+            }
+          }
+        } catch (err2) {
+          console.error(
+            'Error while initializing FinalDecision after director save',
+            err2
+          );
+        }
+      }
 
       return res.json({
         ok: true,

@@ -10,8 +10,8 @@ import { useNavigate } from 'react-router-dom';
 const MENU = [
   { label: 'الرئيسية',               to: '/acceuil',   },
   { label: 'إدارة المستخدمين',       to: '/admin/gestionadmin', activeFor: ['/admin/gestionadmin']  },
-  { label: 'إدارة المسجلين',       to: '/admin/gestionbd', activeFor: ['/admin/gestionbd']  },
- // { label: 'إدارة الدراسات التدريبية ',    to: '/admin/gestionformations', activeFor: ['/admin/gestionformations']    },
+  { label: 'إدارة المسجلين',       to: '/admin/gestionbd', activeFor: ['/admin/gestionbd','/admin/updateeval']  },
+  { label: 'النتائج النهائية',    to: '/admin/resultat', activeFor: ['/admin/resultat']    },
 ];
 
 
@@ -27,8 +27,8 @@ export default function Header({ userName = 'مستخدم', onLogout }: HeaderPr
 
   const isActive = (item: (typeof MENU)[number]) => {
     // Home must be EXACT
-    if (item.to === '/moderator') {
-      return !!matchPath({ path: '/moderator', end: true }, at);
+    if (item.to === '/admin') {
+      return !!matchPath({ path: '/admin', end: true }, at);
     }
     // If aliases provided, match any (non-exact)
     if (item.activeFor?.length) {
@@ -60,7 +60,7 @@ export default function Header({ userName = 'مستخدم', onLogout }: HeaderPr
           key={item.to}
           to={item.to}
           // `end` ensures NavLink itself is exact for Home, but we also style via isActive()
-          end={item.to === '/moderator'}
+          end={item.to === '/admin'}
           style={() => pill(isActive(item))}
         >
           {item.label}

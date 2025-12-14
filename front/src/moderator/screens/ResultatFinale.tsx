@@ -391,7 +391,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
       {/* Toolbar + entête */}
       <div style={styles.toolbar}>
         <button
-          onClick={() => nav('/moderator/gestionformations')}
+          onClick={() => nav(-1)}
           style={styles.circleRedBtn}
           aria-label="رجوع"
         >

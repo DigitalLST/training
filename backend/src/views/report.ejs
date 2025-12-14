@@ -3,12 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <style>
-    body {
-      font-family: "Amiri", serif;
-      direction: rtl;
-      text-align: right;
-      margin: 20px;
-    }
+  body {
+    font-family: "Amiri", serif;
+    direction: rtl;
+    text-align: right;
+    margin: 20px;
+
+    /* ✅ IMPORTANT pour laisser la place au footer fixed */
+    padding-bottom: 45mm;
+  }
+
+  /* ... ton CSS existant ... */
+
+  /* ✅ Footer signatures CN (miniatures) */
+  .cn-footer {
+    position: fixed;
+    bottom: 8mm;
+    left: 12mm;           /* ✅ bas-gauche */
+    z-index: 9999;
+    display: flex;
+    gap: 8mm;
+    align-items: flex-end;
+
+    /* en RTL, certains navigateurs inversent; on force LTR pour stable */
+    direction: ltr;
+  }
+
+  .cn-footer .sig {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  /* ✅ miniature 1/2 à 1/4 : ajuste ici */
+  .cn-footer img {
+    width: 45px;          /* ≈ 1/2 - 1/4 de tes 100px */
+    height: auto;
+    opacity: 0.95;
+  }
+
+  /* pas de nom/date : uniquement signatures => on enlève tout texte */
+
 
     .header-logo {
       text-align: center;
@@ -132,12 +168,32 @@
 </head>
 <body>
 
+  <!-- ✅ FOOTER mini signatures (président + commissaire) -->
+  <% if ((cnPresident && cnPresident.signatureDataUrl) || (cnCommissioner && cnCommissioner.signatureDataUrl)) { %>
+    <div class="cn-footer">
+      <% if (cnCommissioner && cnCommissioner.signatureDataUrl) { %>
+        <div class="sig">
+          <img src="<%= cnCommissioner.signatureDataUrl %>" alt="commissioner-signature" />
+        </div>
+      <% } %>
+
+      <% if (cnPresident && cnPresident.signatureDataUrl) { %>
+        <div class="sig">
+          <img src="<%= cnPresident.signatureDataUrl %>" alt="president-signature" />
+        </div>
+      <% } %>
+    </div>
+  <% } %>
+
   <!-- EN-TÊTE AVEC LOGO -->
   <div class="header-logo">
     <% if (logoDataUrl) { %>
       <img src="<%= logoDataUrl %>" />
     <% } %>
   </div>
+
+  <!-- ... le reste de ton template inchangé ... -->
+
 
   <div class="title"><%= sessionTitle %></div>
   <div class="subtitle"><%= formationTitle %></div>
@@ -154,36 +210,7 @@
     <div class="subtitle">قائد الدراسة : <%= directorName %></div>
   <% } %>
 
-  <!-- TABLEAU GLOBAL DES RÉSULTATS -->
-  <div class="section-title">النتائج النهائية</div>
-  <table>
-    <thead>
-      <tr>
-        <th>المعرف الكشفي</th>
-        <th>الاسم واللقب</th>
-        <th>الجهة</th>
-        <th>البريد الالكتروني</th>
-        <th>العدد الممنوح</th>
-        <th>النسبة</th>
-        <th>القرار</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% (trainees || []).forEach(function(t) { %>
-        <tr>
-          <td><%= t.idScout || '—' %></td>
-          <td><%= t.prenom || '' %> <%= t.nom || '' %></td>
-          <td><%= t.region || '—' %></td>
-          <td><%= t.email || '—' %></td>
-          <td><%= t.totalMax %>/<%= t.totalNote %></td>
-          <td><%= t.pct.toFixed(1) %>%</td>
-          <td><%= t.decisionLabel %></td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-
-  <!-- STATS GLOBALES -->
+  <!-- ✅ 1) STATS GLOBALES (EN PREMIER) -->
   <div class="section-title">إحصائيات عامة</div>
   <table>
     <thead>
@@ -212,7 +239,7 @@
     <div class="validation"><%= validationSentence %></div>
   <% } %>
 
-  <!-- ÉQUIPE DE DIRECTION (SANS COACH) SUR LA PAGE RÉCAP -->
+  <!-- ✅ 3) ÉQUIPE DE DIRECTION (inchangé, juste après) -->
   <div class="section-title">قيادة الدراسة</div>
   <table class="signatures-table">
     <tbody>
@@ -237,8 +264,60 @@
       <% }) %>
     </tbody>
   </table>
+<!-- ✅ 2) TABLEAU GLOBAL DES RÉSULTATS (APRÈS STATS) -->
+<div class="page-break"></div>
+<div class="section-title">النتائج النهائية</div>
 
-  <!-- PAGES INDIVIDUELLES PAR STAGIAIRE -->
+<%
+  const list = (trainees || []).concat((trainees || []));
+  const PER_PAGE = 30;
+
+  // split en chunks de 30
+  const chunks = [];
+  for (let i = 0; i < list.length; i += PER_PAGE) {
+    chunks.push(list.slice(i, i + PER_PAGE));
+  }
+%>
+
+<% chunks.forEach(function(chunk, pageIdx) { %>
+
+  <% if (pageIdx > 0) { %>
+    <div class="page-break"></div>
+    <div class="section-title">النتائج النهائية (تابع)</div>
+  <% } %>
+
+  <table>
+    <thead>
+      <tr>
+        <th>المعرف الكشفي</th>
+        <th>الاسم واللقب</th>
+        <th>الجهة</th>
+        <th>البريد الالكتروني</th>
+        <th>العدد الممنوح</th>
+        <th>النسبة</th>
+        <th>القرار</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      <% chunk.forEach(function(t) { %>
+        <tr>
+          <td><%= t.idScout || '—' %></td>
+          <td><%= (t.prenom || '') + ' ' + (t.nom || '') %></td>
+          <td><%= t.region || '—' %></td>
+          <td><%= t.email || '—' %></td>
+          <td><%= t.totalMax %>/<%= t.totalNote %></td>
+          <td><%= (t.pct || 0).toFixed(1) %>%</td>
+          <td><%= t.decisionLabel %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+
+<% }) %>
+
+
+  <!-- PAGES INDIVIDUELLES PAR STAGIAIRE (inchangé) -->
   <% (trainees || []).forEach(function(t, idx) { %>
     <div class="page-break"></div>
 
@@ -263,7 +342,6 @@
       </thead>
 
       <% if (t.evaluationGroups && t.evaluationGroups.length) { %>
-        <!-- Version avec fusion des cellules famille -->
         <tbody>
           <% (t.evaluationGroups || []).forEach(function(g) { %>
             <% (g.rows || []).forEach(function(r, idxRow) { %>
@@ -279,7 +357,6 @@
           <% }) %>
         </tbody>
       <% } else { %>
-        <!-- Fallback : ancienne version ligne à ligne -->
         <tbody>
           <% (t.evaluationRows || []).forEach(function(r) { %>
             <tr>
@@ -298,7 +375,6 @@
       ( <%= t.pct.toFixed(1) %>% ) – القرار : <%= t.decisionLabel %>
     </div>
 
-    <!-- ÉQUIPE DE دِراسة (SANS COACH) SUR CHAQUE PAGE -->
     <div class="section-title">قيادة الدراسة</div>
     <table class="signatures-table">
       <tbody>
@@ -324,9 +400,9 @@
       </tbody>
     </table>
 
-  <% }) %> <!-- fin boucle trainees -->
+  <% }) %>
 
-  <!-- 🔹 PAGE RAPPORT DIRECTEUR -->
+  <!-- 🔹 PAGE RAPPORT DIRECTEUR (inchangé) -->
   <% if (directorReport) { %>
     <div class="page-break"></div>
 
@@ -387,7 +463,7 @@
     </table>
   <% } %>
 
-  <!-- 🔹 PAGE RAPPORT COACH -->
+  <!-- 🔹 PAGE RAPPORT COACH (inchangé) -->
   <% if (coachReport) { %>
     <div class="page-break"></div>
 
@@ -444,6 +520,53 @@
             <% } %>
           </td>
         </tr>
+      </tbody>
+    </table>
+  <% } %>
+
+  <!-- ✅ AJOUT: Signatures CN sur la DERNIÈRE PAGE du rapport -->
+  <% if (cnPresident || cnCommissioner) { %>
+    <div class="page-break"></div>
+    <div class="section-title"> المصادقة النهائية</div>
+    <table class="signatures-table">
+      <tbody>
+        <% if (cnCommissioner) { %>
+          <tr>
+            <td>
+              <div><strong><%= cnCommissioner.roleLabel %></strong></div>
+              <div><%= (cnCommissioner.prenom || '') %> <%= (cnCommissioner.nom || '') %></div>
+            </td>
+            <td>
+              <% if (cnCommissioner.validatedAtText) { %>
+                <div>تاريخ المصادقة : <%= cnCommissioner.validatedAtText %></div>
+              <% } %>
+            </td>
+            <td>
+              <% if (cnCommissioner.signatureDataUrl) { %>
+                <div><img src="<%= cnCommissioner.signatureDataUrl %>" /></div>
+              <% } %>
+            </td>
+          </tr>
+        <% } %>
+
+        <% if (cnPresident) { %>
+          <tr>
+            <td>
+              <div><strong><%= cnPresident.roleLabel %></strong></div>
+              <div><%= (cnPresident.prenom || '') %> <%= (cnPresident.nom || '') %></div>
+            </td>
+            <td>
+              <% if (cnPresident.validatedAtText) { %>
+                <div>تاريخ المصادقة : <%= cnPresident.validatedAtText %></div>
+              <% } %>
+            </td>
+            <td>
+              <% if (cnPresident.signatureDataUrl) { %>
+                <div><img src="<%= cnPresident.signatureDataUrl %>" /></div>
+              <% } %>
+            </td>
+          </tr>
+        <% } %>
       </tbody>
     </table>
   <% } %>

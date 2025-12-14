@@ -21,7 +21,8 @@ const decisionRoutes=require('../src/routes/finalDecision');
 const meRoutes = require('../src/routes/me');
 const reportRoutes = require('../src/routes/reports');
 const adminRoutes = require('../src/routes/admins');
-const adminEvaluationsRouter = require('./routes/adminEvaluations');
+const adminEvaluationsRouter = require('../src/routes/adminEvaluations');
+const adminResultsRouter = require('../src/routes/adminResults');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -47,6 +48,7 @@ app.use('/api/evaluations', evaluationRoutes);
 app.use('/api/final-decisions', decisionRoutes);
 app.use('/api/admins', adminRoutes);
 app.use('/api/admin/evaluations', adminEvaluationsRouter);
+app.use('/api/admin/results', adminResultsRouter);
 app.use(
   '/static/signatures',
   express.static(path.join(__dirname, SIGNATURE_DIR))

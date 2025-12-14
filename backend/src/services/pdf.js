@@ -30,6 +30,18 @@ function formatDateTimeAr(iso) {
   return { dateStr, timeStr, full: `تم الإمضاء يوم ${dateStr} على الساعة ${timeStr}` };
 }
 
+// ✅ AJOUT: helper date simple (validation CN)
+function toDateStrAr(date) {
+  if (!date) return '';
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('ar-TN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
 async function generateFinalResultsPdf(rawData) {
   const templatePath = path.join(__dirname, '..', 'views', 'report.ejs');
   console.log('TEMPLATE PATH:', templatePath);
@@ -80,8 +92,6 @@ async function generateFinalResultsPdf(rawData) {
   let assistantName = '';
   let coachName = '';
 
-  // 🔹 Team : rôle + signature en base64
-  // 🔹 Team : rôle + signature en base64
   (data.team || []).forEach(m => {
     // Libellé du rôle
     if (m.role === 'director') m.roleLabel = 'قائد الدراسة';
@@ -110,8 +120,7 @@ async function generateFinalResultsPdf(rawData) {
         const abs = path.join(__dirname, '..', rel);   // backend/src + rel
         if (fs.existsSync(abs)) {
           const sigBuf = fs.readFileSync(abs);
-          m.signatureDataUrl =
-            'data:image/png;base64,' + sigBuf.toString('base64');
+          m.signatureDataUrl = 'data:image/png;base64,' + sigBuf.toString('base64');
         } else {
           console.warn('Signature file not found:', abs);
         }
@@ -139,8 +148,6 @@ async function generateFinalResultsPdf(rawData) {
       data.coachReport.signatureDataUrl || coachMember.signatureDataUrl || null;
   }
 
-
-
   data.assistantName = assistantName || '';
   data.coachName = coachName || '';
 
@@ -152,29 +159,18 @@ async function generateFinalResultsPdf(rawData) {
     const ev = t.evaluation || {};
     const items = Array.isArray(ev.items) ? ev.items : [];
 
-    // Normalisation des lignes
     const flatRows = items.map(it => ({
       famille: it.familleLabel || it.famille || '',
       critere: it.critereLabel || it.critere || '',
-      note:
-        it.note !== undefined && it.note !== null
-          ? String(it.note)
-          : '',
-      maxnote:
-        it.maxnote !== undefined && it.maxnote !== null
-          ? String(it.maxnote)
-          : '',
+      note: it.note !== undefined && it.note !== null ? String(it.note) : '',
+      maxnote: it.maxnote !== undefined && it.maxnote !== null ? String(it.maxnote) : '',
     }));
 
-    // Groupement par famille (en respectant l’ordre)
     const groups = [];
     flatRows.forEach(row => {
       const lastGroup = groups[groups.length - 1];
       if (!lastGroup || lastGroup.famille !== row.famille) {
-        groups.push({
-          famille: row.famille,
-          rows: [],
-        });
+        groups.push({ famille: row.famille, rows: [] });
       }
       groups[groups.length - 1].rows.push({
         critere: row.critere,
@@ -183,9 +179,8 @@ async function generateFinalResultsPdf(rawData) {
       });
     });
 
-    // Pour le template
-    t.evaluationRows = flatRows;   // version “flat”
-    t.evaluationGroups = groups;   // version groupée
+    t.evaluationRows = flatRows;
+    t.evaluationGroups = groups;
   });
 
   // 🔹 Phrase de validation globale
@@ -205,7 +200,7 @@ async function generateFinalResultsPdf(rawData) {
     data.validationSentence = '';
   }
 
-  // 🔹 Rapports directeur / coach (optionnels, affichés seulement si signedAt)
+  // 🔹 Rapports directeur / coach
   let directorReport = data.directorReport || null;
   let coachReport = data.coachReport || null;
 
@@ -226,15 +221,53 @@ async function generateFinalResultsPdf(rawData) {
   data.directorReport = directorReport;
   data.coachReport = coachReport;
 
-  // --------- Render HTML ---------
+  // Trier résultats finaux par région (puis nom/prenom pour stabilité)
+  const regionRank = (r) => (r == null ? 'ZZZ' : String(r).trim() || 'ZZZ');
 
+  data.trainees = (data.trainees || []).slice().sort((a, b) => {
+    const ra = regionRank(a.region).localeCompare(regionRank(b.region), 'ar', { sensitivity: 'base' });
+    if (ra !== 0) return ra;
+
+    const ln = String(a.nom || '').localeCompare(String(b.nom || ''), 'ar', { sensitivity: 'base' });
+    if (ln !== 0) return ln;
+
+    return String(a.prenom || '').localeCompare(String(b.prenom || ''), 'ar', { sensitivity: 'base' });
+  });
+
+  // ✅ AJOUT: CN president/commissioner (date + signature base64)
+  function readSignatureDataUrl(signatureUrl) {
+    if (!signatureUrl) return null;
+    try {
+      const rel = String(signatureUrl).replace(/^\//, '');
+      const abs = path.join(__dirname, '..', rel);
+      if (!fs.existsSync(abs)) {
+        console.warn('CN signature file not found:', abs);
+        return null;
+      }
+      const buf = fs.readFileSync(abs);
+      return 'data:image/png;base64,' + buf.toString('base64');
+    } catch (err) {
+      console.warn('CN signature read error:', err.message);
+      return null;
+    }
+  }
+
+  if (data.cnPresident) {
+    data.cnPresident.validatedAtText = toDateStrAr(data.cnPresident.validatedAt);
+    data.cnPresident.signatureDataUrl = readSignatureDataUrl(data.cnPresident.signatureUrl);
+  }
+  if (data.cnCommissioner) {
+    data.cnCommissioner.validatedAtText = toDateStrAr(data.cnCommissioner.validatedAt);
+    data.cnCommissioner.signatureDataUrl = readSignatureDataUrl(data.cnCommissioner.signatureUrl);
+  }
+
+  // --------- Render HTML ---------
   const html = await ejs.renderFile(templatePath, data, { async: true });
   console.log('HTML LENGTH:', html.length);
 
   const browser = await puppeteer.launch({
     headless: true,
-    executablePath:
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     args: [
       '--disable-gpu',
       '--disable-dev-shm-usage',

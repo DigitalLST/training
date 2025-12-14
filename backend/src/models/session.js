@@ -1,7 +1,8 @@
 // models/session.js
-const { Schema, model } = require('mongoose');
+const mongoose = require('mongoose');
 
-const SessionSchema = new Schema({
+
+const SessionSchema = new mongoose.Schema({
   title:       { type: String, required: true },
   startDate:   { type: Date,   required: true },
   endDate:     { type: Date,   required: true },
@@ -27,7 +28,19 @@ const SessionSchema = new Schema({
   // 🆕 Organisateur (fixé par cet écran)
   organizer: { type: String, required: true, default: 'اللجنة الوطنية لتنمية القيادات' },
 
-  isVisible: { type: Boolean, default: false }
+  isVisible: { type: Boolean, default: false },
+  validations: {
+    commissioner: {
+      isValidated: { type: Boolean, default: false },
+      validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      validatedAt: { type: Date, default: null },
+    },
+    president: {
+      isValidated: { type: Boolean, default: false },
+      validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      validatedAt: { type: Date, default: null },
+    }
+  }
 }, { timestamps: true });
 
 SessionSchema.index({ title: 1 }, { unique: true });
@@ -39,4 +52,4 @@ SessionSchema.pre('save', function (next) {
   next();
 });
 
-module.exports = model('Session', SessionSchema);
+module.exports = mongoose.model('Session', SessionSchema);
