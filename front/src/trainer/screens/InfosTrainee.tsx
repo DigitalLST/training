@@ -21,7 +21,7 @@ type FormationLite = {
   endDate?: string;
   centreTitle?: string;
   centreRegion?: string;
-  sessionId?: string;          // 👈 important pour /demandes/resync-formation
+  sessionId?: string;          // toujours dispo si tu en as besoin ailleurs
 };
 
 // Trainee minimal (vient de /affectations/formations/:fid/affectations)
@@ -33,7 +33,7 @@ type TraineeUser = {
   idScout?: string;
   region?: string;
   certifsSnapshot?: CertifLite[];
-  affectationId: string;       // 👈 id de l'affectation (FormationAffectation._id)
+  affectationId: string;       // 👈 id de l'affectation (SessionAffectation._id)
   isPresent?: boolean;         // 👈 flag présence
 };
 
@@ -196,15 +196,6 @@ export default function InfosTrainee(): React.JSX.Element {
   /* ------- Rafraîchir les certifsSnapshot seulement pour les trainees de la page affichée ------- */
   async function onRefreshCertifs(f: FormationLite) {
     const fid = f.formationId;
-    const sessionId = f.sessionId;
-
-    if (!sessionId) {
-      setErrTrainees(prev => ({
-        ...prev,
-        [fid]: 'لا يمكن تحديث الشهادات: لا توجد جلسة مرتبطة بهذه الدورة.',
-      }));
-      return;
-    }
 
     const list = trainees[fid] || [];
     if (!list.length) return;
@@ -216,9 +207,12 @@ export default function InfosTrainee(): React.JSX.Element {
     const startIndex = (safePage - 1) * PAGE_SIZE;
     const pageItems = list.slice(startIndex, startIndex + PAGE_SIZE);
 
-    const userIds = pageItems
-      .map(u => u._id)
+    // 👇 On envoie les affectationIds des trainees affichés
+    const affectationIds = pageItems
+      .map(u => u.affectationId)
       .filter(Boolean);
+
+    if (!affectationIds.length) return;
 
     try {
       setRefreshing(prev => ({ ...prev, [fid]: true }));
@@ -228,8 +222,8 @@ export default function InfosTrainee(): React.JSX.Element {
         method: 'POST',
         headers: headers(),
         body: JSON.stringify({
-          sessionId,
-          userIds,
+          formationId: fid,
+          affectationIds,
         }),
       });
 
@@ -692,7 +686,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   pageBtn: {
     borderRadius: 999,
-    border: '1px solid #e5e7eb',
+    border: '1px solid #e9edf3',
     padding: '4px 10px',
     background: '#f9fafb',
     cursor: 'pointer',
