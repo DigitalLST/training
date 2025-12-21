@@ -435,6 +435,17 @@ router.post('/resync-page', requireAuth, async (req, res, next) => {
  *  - met à jour User.certifsSnapshot
  *  - (optionnel) met à jour Demande.certifsSnapshot si tu veux garder la cohérence
  */
+/**
+ * POST /api/demandes/resync-affectations
+ * Body: { affectationIds: string[] }
+ *
+ * Pour chaque affectation trainee :
+ *  - populate user
+ *  - récupère idScout/idKachefa
+ *  - appelle e-training
+ *  - met à jour User.certifsSnapshot
+ *  - met aussi à jour Demande.certifsSnapshot pour ce user
+ */
 router.post('/resync-affectations', requireAuth, async (req, res, next) => {
   try {
     const affectationIdsRaw = req.body.affectationIds || [];
@@ -449,15 +460,15 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'No valid affectationIds provided' });
     }
 
-    // TODO: contrôle d'accès : vérifier que le user connecté a bien le droit
-    // d'agir sur ces affectations (director/trainer de la formation par ex.)
+    // TODO: contrôle d'accès (vérifier que le user connecté est bien director/trainer sur ces formations)
     const affectations = await SessionAffectation.find({
       _id: { $in: affectationIds },
       role: 'trainee',
     })
       .populate({
         path: 'user',
-        select: 'idScout scoutId idKachefa kachefaId prenom nom email region certifsSnapshot',
+        select:
+          'idScout scoutId idKachefa kachefaId prenom nom email region certifsSnapshot',
       })
       .lean();
 
@@ -494,7 +505,7 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
       let snap = u.certifsSnapshot || [];
 
       try {
-        await delay(150); // éviter de spammer l’APIGW
+        await delay(150); // pour ne pas spammer l'APIGW
         snap = await fetchCertifsByIdKachefa(String(idScout));
       } catch (e) {
         const msg = String(e?.message || '');
@@ -502,24 +513,24 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
 
         if (msg === 'ETRAINING_RATE_LIMIT') {
           rateLimited = true;
-          break; // on arrête la boucle
+          break;
         }
 
         // autre erreur : on garde l'ancien snapshot
         snap = u.certifsSnapshot || [];
       }
 
-      // 🔁 Mise à jour du User
+      // 🔁 1) Mise à jour du User
       await User.updateOne(
         { _id: u._id },
         { $set: { certifsSnapshot: snap } }
       );
 
-      // (optionnel) si tu veux sync avec Demande aussi :
-      // await Demande.updateMany(
-      //   { applicant: u._id },
-      //   { $set: { certifsSnapshot: snap } }
-      // );
+      // 🔁 2) Mise à jour de toutes les Demandes de ce user
+      await Demande.updateMany(
+        { applicant: u._id },
+        { $set: { certifsSnapshot: snap } }
+      );
 
       processed++;
     }
@@ -535,6 +546,7 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
 
 
 
