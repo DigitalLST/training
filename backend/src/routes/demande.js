@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 
 const Demande = require('../models/demande');
 const Session = require('../models/session');
+const SessionAffectation=require('../models/affectation');
 const User    = require('../models/user');
 const requireAuth = require('../middlewares/auth');
 
@@ -423,110 +424,16 @@ router.post('/resync-page', requireAuth, async (req, res, next) => {
  *  - Pour chaque trainee, on appelle e-training
  *  - On met à jour le snapshot dans User (et éventuellement dans Demande si tu veux)
  */
-router.post('/resync-formation', requireAuth, async (req, res, next) => {
-  try {
-    const { formationId } = req.body;
-    const affectationIdsRaw = req.body.affectationIds || [];
-
-    if (!isValidId(formationId)) {
-      return res.status(400).json({ error: 'Invalid formationId' });
-    }
-
-    const affectationIds = Array.isArray(affectationIdsRaw)
-      ? affectationIdsRaw.filter((id) => isValidId(id))
-      : [];
-
-    // TODO: contrôle d'accès (director/trainer sur cette formation)
-
-    // 🧱 On bosse sur les affectations, pas sur Demande
-    const filt = {
-      formation: formationId,
-      role: 'trainee',
-    };
-
-    if (affectationIds.length > 0) {
-      filt._id = { $in: affectationIds };
-    }
-
-    const affectations = await SessionAffectation.find(filt)
-      .populate({
-        path: 'user',
-        select: 'idScout scoutId idKachefa kachefaId prenom nom email region certifsSnapshot',
-      })
-      .lean();
-
-    let processed = 0;
-    let rateLimited = false;
-
-    for (const a of affectations) {
-      const u = a.user;
-      if (!u) continue;
-
-      const idScout =
-        u.idScout ||
-        u.scoutId ||
-        u.idKachefa ||
-        u.kachefaId ||
-        '';
-
-      if (!idScout || !/^\d{10}$/.test(String(idScout))) {
-        continue;
-      }
-
-      let snap = u.certifsSnapshot || [];
-
-      try {
-        await delay(150); // éviter le spam d'APIGW
-        snap = await fetchCertifsByIdKachefa(String(idScout));
-      } catch (e) {
-        const msg = String(e?.message || '');
-        console.error('[e-training resync-formation] error for', idScout, msg);
-
-        if (msg === 'ETRAINING_RATE_LIMIT') {
-          rateLimited = true;
-          break;
-        }
-
-        // autre erreur : on garde l'ancien snapshot
-        snap = u.certifsSnapshot || [];
-      }
-
-      // 🔁 on met à jour le User
-      await User.updateOne(
-        { _id: u._id },
-        { $set: { certifsSnapshot: snap } }
-      );
-
-      // (optionnel) si tu veux garder la cohérence dans Demande :
-      await Demande.updateMany(
-        { applicant: u._id },
-        { $set: { certifsSnapshot: snap } }
-      );
-
-      processed++;
-    }
-
-    return res.json({
-      ok: true,
-      processed,
-      totalAffectations: affectations.length,
-      rateLimited,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
 /**
  * POST /api/demandes/resync-affectations
  * Body: { affectationIds: string[] }
  *
- * Pour chaque affectation :
- *  - on récupère l'user (via SessionAffectation.user)
- *  - on lit idScout / idKachefa
- *  - on appelle e-training
- *  - on met à jour User.certifsSnapshot
- *  - (optionnel) on met aussi à jour Demande.certifsSnapshot pour ce user
+ * Pour chaque affectation:
+ *  - récupère user (via SessionAffectation.user)
+ *  - lit idScout (ou idKachefa)
+ *  - appelle e-training
+ *  - met à jour User.certifsSnapshot
+ *  - (optionnel) met à jour Demande.certifsSnapshot si tu veux garder la cohérence
  */
 router.post('/resync-affectations', requireAuth, async (req, res, next) => {
   try {
@@ -538,21 +445,19 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
 
     const affectationIds = affectationIdsRaw.filter((id) => isValidId(id));
 
-    if (affectationIds.length === 0) {
+    if (!affectationIds.length) {
       return res.status(400).json({ error: 'No valid affectationIds provided' });
     }
 
-    // TODO: contrôle d'accès : vérifier que l'utilisateur connecté a le droit
-    // d'agir sur ces affectations (ex: director / trainer de la formation)
-
+    // TODO: contrôle d'accès : vérifier que le user connecté a bien le droit
+    // d'agir sur ces affectations (director/trainer de la formation par ex.)
     const affectations = await SessionAffectation.find({
       _id: { $in: affectationIds },
       role: 'trainee',
     })
       .populate({
         path: 'user',
-        select:
-          'idScout scoutId idKachefa kachefaId prenom nom email region certifsSnapshot',
+        select: 'idScout scoutId idKachefa kachefaId prenom nom email region certifsSnapshot',
       })
       .lean();
 
@@ -581,7 +486,7 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
         u.kachefaId ||
         '';
 
-      if (!idScout || !/^\d{10}$/.test(String(idScout))) {
+      if (!idScout || !/^[0-9]{10}$/.test(String(idScout))) {
         skippedInvalidId++;
         continue;
       }
@@ -592,7 +497,7 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
         await delay(150); // éviter de spammer l’APIGW
         snap = await fetchCertifsByIdKachefa(String(idScout));
       } catch (e) {
-        const msg = String((e)?.message || '');
+        const msg = String(e?.message || '');
         console.error('[e-training resync-affectations] error for', idScout, msg);
 
         if (msg === 'ETRAINING_RATE_LIMIT') {
@@ -610,11 +515,11 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
         { $set: { certifsSnapshot: snap } }
       );
 
-      // (optionnel) garder la cohérence dans Demande
-      await Demande.updateMany(
-        { applicant: u._id },
-        { $set: { certifsSnapshot: snap } }
-      );
+      // (optionnel) si tu veux sync avec Demande aussi :
+      // await Demande.updateMany(
+      //   { applicant: u._id },
+      //   { $set: { certifsSnapshot: snap } }
+      // );
 
       processed++;
     }
