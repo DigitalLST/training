@@ -194,52 +194,46 @@ export default function InfosTrainee(): React.JSX.Element {
   }
 
   /* ------- Rafraîchir les certifsSnapshot seulement pour les trainees de la page affichée ------- */
-  async function onRefreshCertifs(f: FormationLite) {
-    const fid = f.formationId;
+ /* ------- Rafraîchir les certifsSnapshot pour TOUS les trainees de la formation (via affectations) ------- */
+async function onRefreshCertifs(f: FormationLite) {
+  const fid = f.formationId;
+  const list = trainees[fid] || [];
 
-    const list = trainees[fid] || [];
-    if (!list.length) return;
+  if (!list.length) return; // rien à faire
 
-    // calcul page courante (même logique que pour l’affichage)
-    const totalPages = list.length === 0 ? 1 : Math.ceil(list.length / PAGE_SIZE);
-    const currentPage = pageByFormation[fid] || 1;
-    const safePage = Math.min(Math.max(currentPage, 1), totalPages);
-    const startIndex = (safePage - 1) * PAGE_SIZE;
-    const pageItems = list.slice(startIndex, startIndex + PAGE_SIZE);
+  // 👇 Liste des affectationIds pour tous les trainees de cette formation
+  const affectationIds = list
+    .map(u => u.affectationId)
+    .filter(Boolean);
 
-    // 👇 On envoie les affectationIds des trainees affichés
-    const affectationIds = pageItems
-      .map(u => u.affectationId)
-      .filter(Boolean);
+  if (!affectationIds.length) return;
 
-    if (!affectationIds.length) return;
+  try {
+    setRefreshing(prev => ({ ...prev, [fid]: true }));
+    setErrTrainees(prev => ({ ...prev, [fid]: null }));
 
-    try {
-      setRefreshing(prev => ({ ...prev, [fid]: true }));
-      setErrTrainees(prev => ({ ...prev, [fid]: null }));
+    const r = await fetch(`${API_BASE}/demandes/resync-affectations`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        affectationIds,
+      }),
+    });
 
-      const r = await fetch(`${API_BASE}/demandes/resync-formation`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({
-          formationId: fid,
-          affectationIds,
-        }),
-      });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-
-      // puis recharger la liste
-      await loadTraineesForFormation(fid);
-    } catch (e: any) {
-      setErrTrainees(prev => ({
-        ...prev,
-        [fid]: e?.message || 'تعذّر تحديث الشهادات',
-      }));
-    } finally {
-      setRefreshing(prev => ({ ...prev, [fid]: false }));
-    }
+    // Une fois la resync terminée, on recharge les trainees de cette formation
+    await loadTraineesForFormation(fid);
+  } catch (e: any) {
+    setErrTrainees(prev => ({
+      ...prev,
+      [fid]: e?.message || 'تعذّر تحديث الشهادات',
+    }));
+  } finally {
+    setRefreshing(prev => ({ ...prev, [fid]: false }));
   }
+}
+
 
   /* ------- Toggle présence pour un trainee (dans le state local) ------- */
   function onTogglePresence(formationId: string, userId: string, value: boolean) {

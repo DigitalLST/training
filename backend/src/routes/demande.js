@@ -517,5 +517,120 @@ router.post('/resync-formation', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/demandes/resync-affectations
+ * Body: { affectationIds: string[] }
+ *
+ * Pour chaque affectation :
+ *  - on récupère l'user (via SessionAffectation.user)
+ *  - on lit idScout / idKachefa
+ *  - on appelle e-training
+ *  - on met à jour User.certifsSnapshot
+ *  - (optionnel) on met aussi à jour Demande.certifsSnapshot pour ce user
+ */
+router.post('/resync-affectations', requireAuth, async (req, res, next) => {
+  try {
+    const affectationIdsRaw = req.body.affectationIds || [];
+
+    if (!Array.isArray(affectationIdsRaw) || affectationIdsRaw.length === 0) {
+      return res.status(400).json({ error: 'affectationIds array is required' });
+    }
+
+    const affectationIds = affectationIdsRaw.filter((id) => isValidId(id));
+
+    if (affectationIds.length === 0) {
+      return res.status(400).json({ error: 'No valid affectationIds provided' });
+    }
+
+    // TODO: contrôle d'accès : vérifier que l'utilisateur connecté a le droit
+    // d'agir sur ces affectations (ex: director / trainer de la formation)
+
+    const affectations = await SessionAffectation.find({
+      _id: { $in: affectationIds },
+      role: 'trainee',
+    })
+      .populate({
+        path: 'user',
+        select:
+          'idScout scoutId idKachefa kachefaId prenom nom email region certifsSnapshot',
+      })
+      .lean();
+
+    if (!affectations.length) {
+      return res.json({
+        ok: true,
+        processed: 0,
+        totalAffectations: 0,
+        rateLimited: false,
+        message: 'No trainee affectations found for given ids',
+      });
+    }
+
+    let processed = 0;
+    let skippedInvalidId = 0;
+    let rateLimited = false;
+
+    for (const a of affectations) {
+      const u = a.user;
+      if (!u) continue;
+
+      const idScout =
+        u.idScout ||
+        u.scoutId ||
+        u.idKachefa ||
+        u.kachefaId ||
+        '';
+
+      if (!idScout || !/^\d{10}$/.test(String(idScout))) {
+        skippedInvalidId++;
+        continue;
+      }
+
+      let snap = u.certifsSnapshot || [];
+
+      try {
+        await delay(150); // éviter de spammer l’APIGW
+        snap = await fetchCertifsByIdKachefa(String(idScout));
+      } catch (e) {
+        const msg = String((e)?.message || '');
+        console.error('[e-training resync-affectations] error for', idScout, msg);
+
+        if (msg === 'ETRAINING_RATE_LIMIT') {
+          rateLimited = true;
+          break; // on arrête la boucle
+        }
+
+        // autre erreur : on garde l'ancien snapshot
+        snap = u.certifsSnapshot || [];
+      }
+
+      // 🔁 Mise à jour du User
+      await User.updateOne(
+        { _id: u._id },
+        { $set: { certifsSnapshot: snap } }
+      );
+
+      // (optionnel) garder la cohérence dans Demande
+      await Demande.updateMany(
+        { applicant: u._id },
+        { $set: { certifsSnapshot: snap } }
+      );
+
+      processed++;
+    }
+
+    return res.json({
+      ok: true,
+      processed,
+      totalAffectations: affectations.length,
+      skippedInvalidId,
+      rateLimited,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+
 
 module.exports = router;
