@@ -413,5 +413,113 @@ router.post('/resync-page', requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+/**
+ * POST /api/demandes/resync-page
+ * Body: { sessionId, skip, limit, userIds?: string[] }
+ */
+router.post('/resync-formation', requireAuth, async (req, res, next) => {
+  try {
+    const sessionId = req.body.sessionId || req.query.sessionId;
+    const skipRaw  = req.body.skip  ?? req.query.skip  ?? 0;
+    const limitRaw = req.body.limit ?? req.query.limit ?? 50;
+
+    if (!isValidId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId' });
+    }
+
+    // ⚠️ nouveau : support userIds ciblés
+    const userIdsRaw = req.body.userIds || req.query.userIds || [];
+    const userIds = Array.isArray(userIdsRaw)
+      ? userIdsRaw.filter((id) => isValidId(id))
+      : [];
+
+    // TODO: contrôle d'accès (moderator / director / trainer autorisé sur cette session)
+
+    const filt = { session: sessionId };
+
+    // Si on a des userIds -> on ne traite que ces applicants
+    if (userIds.length > 0) {
+      filt.applicant = { $in: userIds };
+    }
+
+    const skip  = userIds.length > 0 ? 0 : Number(skipRaw);
+    const limit = userIds.length > 0
+      ? Math.min(userIds.length, 200) // ciblé = max 200 users
+      : Math.min(Number(limitRaw), 200);
+
+    const total = await Demande.countDocuments(filt);
+
+    const demandes = await Demande.find(filt)
+      .sort({ createdAt: 1 }) // ↩️ même ordre que le GET "normal"
+      .skip(skip)
+      .limit(limit)
+      .populate({
+        path: 'applicant',
+        select: 'idScout scoutId idKachefa kachefaId prenom nom email region',
+      })
+      .lean();
+
+    let processed = 0;
+    let rateLimited = false;
+
+    for (const d of demandes) {
+      const u = d.applicant;
+      if (!u) continue;
+
+      const idScout =
+        u.idScout ||
+        u.scoutId ||
+        u.idKachefa ||
+        u.kachefaId ||
+        d.applicantSnapshot?.idScout ||
+        '';
+
+      if (!idScout || !/^\d{10}$/.test(String(idScout))) {
+        continue;
+      }
+
+      let snap = d.certifsSnapshot || [];
+
+      try {
+        await delay(150); // éviter le spam APIGW
+        snap = await fetchCertifsByIdKachefa(String(idScout));
+      } catch (e) {
+        const msg = String(e?.message || '');
+        console.error('[e-training refresh-page] error for', idScout, msg);
+
+        if (msg === 'ETRAINING_RATE_LIMIT') {
+          rateLimited = true;
+          break;
+        }
+
+        snap = d.certifsSnapshot || [];
+      }
+
+      await Demande.updateOne(
+        { _id: d._id },
+        { $set: { certifsSnapshot: snap } }
+      );
+      processed++;
+    }
+
+    // Si on était en mode ciblé (userIds), pas de notion de "next page"
+    const next =
+      userIds.length > 0 || rateLimited
+        ? null
+        : { sessionId, nextSkip: skip + limit, limit };
+
+    return res.json({
+      ok: true,
+      processed,
+      totalInPage: demandes.length,
+      totalAll: total,
+      rateLimited,
+      next,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 module.exports = router;

@@ -21,7 +21,7 @@ type FormationLite = {
   endDate?: string;
   centreTitle?: string;
   centreRegion?: string;
-  sessionId?: string;          // 👈 important pour /demandes/resync-page
+  sessionId?: string;          // 👈 important pour /demandes/resync-formation
 };
 
 // Trainee minimal (vient de /affectations/formations/:fid/affectations)
@@ -193,7 +193,7 @@ export default function InfosTrainee(): React.JSX.Element {
     await loadTraineesForFormation(fid);
   }
 
-  /* ------- Rafraîchir les certifsSnapshot pour une formation (via /demandes/resync-page) ------- */
+  /* ------- Rafraîchir les certifsSnapshot seulement pour les trainees de la page affichée ------- */
   async function onRefreshCertifs(f: FormationLite) {
     const fid = f.formationId;
     const sessionId = f.sessionId;
@@ -206,17 +206,30 @@ export default function InfosTrainee(): React.JSX.Element {
       return;
     }
 
+    const list = trainees[fid] || [];
+    if (!list.length) return;
+
+    // calcul page courante (même logique que pour l’affichage)
+    const totalPages = list.length === 0 ? 1 : Math.ceil(list.length / PAGE_SIZE);
+    const currentPage = pageByFormation[fid] || 1;
+    const safePage = Math.min(Math.max(currentPage, 1), totalPages);
+    const startIndex = (safePage - 1) * PAGE_SIZE;
+    const pageItems = list.slice(startIndex, startIndex + PAGE_SIZE);
+
+    const userIds = pageItems
+      .map(u => u._id)
+      .filter(Boolean);
+
     try {
       setRefreshing(prev => ({ ...prev, [fid]: true }));
       setErrTrainees(prev => ({ ...prev, [fid]: null }));
 
-      const r = await fetch(`${API_BASE}/demandes/resync-page`, {
+      const r = await fetch(`${API_BASE}/demandes/resync-formation`, {
         method: 'POST',
         headers: headers(),
         body: JSON.stringify({
           sessionId,
-          skip: 0,
-          limit: 200,
+          userIds,
         }),
       });
 
@@ -320,10 +333,10 @@ export default function InfosTrainee(): React.JSX.Element {
 
           const levelsToShow = getLevelsForFormation(f.nom);
           const isDirector = f.myRole === 'director'; // 👈 clef de la gestion de présence
-          function toYMD(d: Date) {return d.toISOString().slice(0, 10);}
+          function toYMD(d: Date) { return d.toISOString().slice(0, 10); }
           const todayYmd = toYMD(new Date());
-          const startYmd = f?.startDate? toYMD(new Date(f.startDate)): null;
-          const canEditPresence =isDirector && startYmd !== null && todayYmd >= startYmd;
+          const startYmd = f?.startDate ? toYMD(new Date(f.startDate)) : null;
+          const canEditPresence = isDirector && startYmd !== null && todayYmd >= startYmd;
 
           const totalPages =
             list.length === 0 ? 1 : Math.ceil(list.length / PAGE_SIZE);
