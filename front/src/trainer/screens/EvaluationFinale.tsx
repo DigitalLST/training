@@ -96,6 +96,10 @@ type FinalDecisionFromApi = {
   decision?: FinalDecisionApi | null;
   status: 'draft' | 'pending_team' | 'validated';
   approvals: FinalDecisionApproval[];
+
+  // ✅ comments
+  comment?: string;
+  commentedAt?: string | null;
 };
 
 type TeamMember = {
@@ -121,6 +125,10 @@ function headers(): Record<string, string> {
   const t = localStorage.getItem('token');
   if (t) h.Authorization = `Bearer ${t}`;
   return h;
+}
+
+function safeStr(v: any) {
+  return String(v ?? '').trim();
 }
 
 function fmtRange(s?: string, e?: string) {
@@ -183,6 +191,28 @@ function computeTotals(ev: EvaluationLite | null | undefined) {
   return { totalNote, totalMax, pct };
 }
 
+// ✅ règle de décision automatique selon le %
+// >= 60% => pass (fixe)
+// 55%..60% => choix (pass ou repeat)
+// 30%..55% => repeat (fixe)
+// <30% => not_suitable (fixe)
+function suggestedDecisionFromPct(pct: number): FinalDecisionUI | undefined {
+  if (pct >= 60) return 'pass';
+  if (pct < 60 && pct >= 55) return undefined; // zone choix
+  if (pct < 55 && pct >= 30) return 'repeat';
+  return 'not_suitable';
+}
+function isChoiceZone(pct: number) {
+  return pct < 60 && pct >= 55;
+}
+
+// ✅ statut final decisions (message UI)
+function statusTextArabic(status: FormationStatus): string {
+  if (status === 'draft') return 'في انتظار إصدار النتائج من قائد الدراسة';
+  if (status === 'pending_team') return 'في انتظار مصادقة قيادة الدراسة';
+  return 'تمّت المصادقة النهائية';
+}
+
 /* ------------------------ Component ------------------------ */
 
 export default function EvaluationFinale(): React.JSX.Element {
@@ -199,12 +229,15 @@ export default function EvaluationFinale(): React.JSX.Element {
   const [errTrainees, setErrTrainees] = React.useState<Record<string, string | null>>({});
   const [pageByFormation, setPageByFormation] = React.useState<Record<string, number>>({});
 
-  /** formationId:traineeId -> décision finale UI */
+  /** formationId:traineeId -> décision finale UI (uniquement utile pour zone choix) */
   const [decisions, setDecisions] = React.useState<Record<string, FinalDecisionUI | undefined>>({});
   const [savingByFormation, setSavingByFormation] = React.useState<Record<string, boolean>>({});
   const [saveErrByFormation, setSaveErrByFormation] = React.useState<Record<string, string | null>>(
     {}
   );
+
+  /** ✅ comments: formationId:traineeId -> text */
+  const [comments, setComments] = React.useState<Record<string, string>>({});
 
   /** équipe par formation */
   const [teamByFormation, setTeamByFormation] = React.useState<Record<string, TeamMember[]>>({});
@@ -245,6 +278,9 @@ export default function EvaluationFinale(): React.JSX.Element {
   }, []);
 
   function decisionKey(formationId: string, traineeId: string) {
+    return `${formationId}:${traineeId}`;
+  }
+  function commentKey(formationId: string, traineeId: string) {
     return `${formationId}:${traineeId}`;
   }
 
@@ -299,6 +335,7 @@ export default function EvaluationFinale(): React.JSX.Element {
 
         setFormationStatusByFormation(prev => ({ ...prev, [fid]: formationStatus }));
 
+        // ✅ hydrate decisions from API (DB truth)
         setDecisions(prev => {
           const copy = { ...prev };
           for (const fd of decs) {
@@ -308,10 +345,18 @@ export default function EvaluationFinale(): React.JSX.Element {
           return copy;
         });
 
+        // ✅ hydrate comments from API
+        setComments(prev => {
+          const copy = { ...prev };
+          for (const fd of decs) {
+            copy[commentKey(fid, fd.traineeId)] = safeStr(fd.comment);
+          }
+          return copy;
+        });
+
         setTeamByFormation(prev => ({ ...prev, [fid]: team }));
         setCurrentUserHasApprovedByFormation(prev => ({ ...prev, [fid]: currentUserHasApproved }));
       } else {
-        // fallback safe
         setFormationStatusByFormation(prev => ({ ...prev, [fid]: 'draft' }));
       }
     } catch (e: any) {
@@ -343,16 +388,30 @@ export default function EvaluationFinale(): React.JSX.Element {
     setDecisions(prev => ({ ...prev, [decisionKey(formationId, traineeId)]: d }));
   }
 
+  function handleCommentChange(formationId: string, traineeId: string, value: string) {
+    setComments(prev => ({ ...prev, [commentKey(formationId, traineeId)]: value }));
+  }
+
   async function handleSaveDecisions(fid: string) {
     const list = trainees[fid] || [];
     const presentValid = list.filter(t => t.isPresent && t.evaluation?.status === 'validated');
 
+    // ✅ on envoie toujours une décision (auto si hors zone choix)
     const payload = presentValid
       .map(t => {
-        const d = decisions[decisionKey(fid, t._id)];
-        return d ? { traineeId: t._id, decision: mapUiDecisionToApi(d) } : null;
+        const totals = computeTotals(t.evaluation);
+        const pct = totals.pct;
+
+        const uiDecision = isChoiceZone(pct)
+          ? decisions[decisionKey(fid, t._id)]
+          : suggestedDecisionFromPct(pct);
+
+        if (!uiDecision) return null; // zone choix non choisie
+
+        const c = comments[commentKey(fid, t._id)] || '';
+        return { traineeId: t._id, decision: mapUiDecisionToApi(uiDecision), comment: c };
       })
-      .filter(Boolean) as { traineeId: string; decision: FinalDecisionApi }[];
+      .filter(Boolean) as { traineeId: string; decision: FinalDecisionApi; comment?: string }[];
 
     if (!payload.length) {
       setSaveErrByFormation(prev => ({
@@ -463,6 +522,12 @@ export default function EvaluationFinale(): React.JSX.Element {
     }
   }
 
+  // ✅ téléchargement (placeholder — remplace l’URL par ta route PDF quand elle existe)
+  async function downloadResults(fid: string) {
+    // Exemple: window.open(`${API_BASE}/final-decisions/formations/${fid}/pdf`, '_blank');
+    window.open(`${API_BASE}/final-decisions/formations/${fid}`, '_blank');
+  }
+
   return (
     <div dir="rtl" style={{ width: '70vw', paddingInline: 24, marginLeft: 20 }}>
       <div style={styles.toolbarRight}>
@@ -508,9 +573,14 @@ export default function EvaluationFinale(): React.JSX.Element {
           const start = (safePage - 1) * PAGE_SIZE;
           const pageItems = sorted.slice(start, start + PAGE_SIZE);
 
+          // ✅ seulement ceux dans zone choix bloquent l’affichage du bouton
           const allHaveDecision =
             validEvals.length > 0 &&
-            validEvals.every(t => decisions[decisionKey(fid, t._id)] !== undefined);
+            validEvals.every(t => {
+              const totals = computeTotals(t.evaluation);
+              if (!isChoiceZone(totals.pct)) return true;
+              return decisions[decisionKey(fid, t._id)] !== undefined;
+            });
 
           const isSaving = savingByFormation[fid] || false;
           const saveErr = saveErrByFormation[fid] || null;
@@ -521,12 +591,17 @@ export default function EvaluationFinale(): React.JSX.Element {
           const trainersApprovedCount = trainers.filter(m => m.hasApproved).length;
 
           const currentUserHasApproved = currentUserHasApprovedByFormation[fid] || false;
-          const trainerButtonDisabled =
-            !isTrainer || currentUserHasApproved || isFinalValidated;
 
-          // quand c'est validé => aucun bouton / aucune action
+          // ✅ logique d'origine conservée:
+          // - director voit "save" tant que pas validated et allHaveDecision
+          // - trainer voit "approve" si allHaveDecision, pas déjà approuvé, pas validated
+          const trainerButtonDisabled = !isTrainer || currentUserHasApproved || isFinalValidated;
+
           const showDirectorSaveBtn = isDirector && allHaveDecision && !isFinalValidated;
           const showTrainerApproveBtn = isTrainer && allHaveDecision && !trainerButtonDisabled;
+
+          // ✅ quand validé: on remplace par bouton téléchargement
+          const showDownloadBtn = isFinalValidated;
 
           const approvers = team.filter(m => m.hasApproved);
 
@@ -570,11 +645,11 @@ export default function EvaluationFinale(): React.JSX.Element {
 
                   {!isLoadingT && !errT && canShowTable && (
                     <>
-                      {/* message statut */}
+                      {/* ✅ message statut (AR) */}
                       <div style={{ fontSize: 12, color: isFinalValidated ? '#16a34a' : '#6b7280' }}>
                         {isFinalValidated
                           ? '✅ تمّت المصادقة النهائية على النتائج. لا يمكن تعديل القرارات بعد الآن.'
-                          : `حالة النتائج النهائية: ${formationStatus}`}
+                          : `حالة النتائج النهائية: ${statusTextArabic(formationStatus)}`}
                       </div>
 
                       <div style={{ overflowX: 'auto' }}>
@@ -588,11 +663,22 @@ export default function EvaluationFinale(): React.JSX.Element {
                               <th style={styles.th}>العلامة</th>
                               <th style={styles.th}>النسبة %</th>
                               <th style={styles.th}>القرار النهائي</th>
+                              <th style={styles.th}>ملاحظات</th>
                             </tr>
                           </thead>
                           <tbody>
                             {pageItems.map(({ trainee: t, totals }) => {
-                              const d = decisions[decisionKey(fid, t._id)];
+                              const pct = totals.pct;
+
+                              // ✅ décision affichée:
+                              // - si validated => valeur DB (decisions state hydraté depuis API)
+                              // - sinon => auto hors zone choix, ou choix du director en zone choix
+                              const dbDecision = decisions[decisionKey(fid, t._id)];
+                              const autoDecision = suggestedDecisionFromPct(pct);
+                              const effectiveDecision =
+                                isFinalValidated ? dbDecision : isChoiceZone(pct) ? dbDecision : autoDecision;
+
+                              const c = comments[commentKey(fid, t._id)] || '';
 
                               return (
                                 <tr key={t._id}>
@@ -605,28 +691,62 @@ export default function EvaluationFinale(): React.JSX.Element {
                                   <td style={styles.td}>
                                     {totals.totalNote}/{totals.totalMax}
                                   </td>
-                                  <td style={styles.td}>{totals.pct.toFixed(1)}%</td>
+                                  <td style={styles.td}>{pct.toFixed(1)}%</td>
+
                                   <td style={styles.td}>
-                                    {/* ✅ READ ONLY si validated */}
                                     {isFinalValidated ? (
-                                      <span style={{ fontSize: 12, color: d ? '#111' : '#999' }}>
-                                        {d ? labelForDecisionUI(d) : '—'}
+                                      <span style={{ fontSize: 12, color: effectiveDecision ? '#111' : '#999' }}>
+                                        {effectiveDecision ? labelForDecisionUI(effectiveDecision) : '—'}
                                       </span>
-                                    ) : isDirector ? (
-                                      <select
-                                        style={styles.select}
-                                        value={d || ''}
-                                        onChange={e => handleDecisionChange(fid, t._id, e.target.value)}
-                                      >
-                                        <option value="">في الانتظار</option>
-                                        <option value="pass">يجاز</option>
-                                        <option value="repeat">يعيد الدورة</option>
-                                        <option value="not_suitable">لا يصلح للدور</option>
-                                      </select>
+                                    ) : !isDirector ? (
+                                      <span style={{ color: effectiveDecision ? '#111' : '#999', fontSize: 12 }}>
+                                        {effectiveDecision
+                                          ? labelForDecisionUI(effectiveDecision)
+                                          : 'في انتظار قرار قائد الدراسة'}
+                                      </span>
                                     ) : (
-                                      <span style={{ color: d ? '#111' : '#999', fontSize: 12 }}>
-                                        {d ? labelForDecisionUI(d) : 'في انتظار قرار قائد الدراسة'}
-                                      </span>
+                                      <>
+                                        {/* ✅ Director: dropdown uniquement zone choix */}
+                                        {isChoiceZone(pct) ? (
+                                          <select
+                                            style={styles.select}
+                                            value={dbDecision || ''}
+                                            onChange={e => handleDecisionChange(fid, t._id, e.target.value)}
+                                          >
+                                            <option value="">اختر قرارا</option>
+                                            <option value="pass">يؤهل</option>
+                                            <option value="repeat">يعيد الدورة</option>
+                                          </select>
+                                        ) : (
+                                          <span style={{ fontSize: 12 }}>
+                                            {autoDecision ? labelForDecisionUI(autoDecision) : '—'}
+                                          </span>
+                                        )}
+                                      </>
+                                    )}
+                                  </td>
+
+                                  {/* ✅ commentaire */}
+                                  <td style={styles.td}>
+                                    {isFinalValidated ? (
+                                      <span style={{ fontSize: 12, color: '#111' }}>{c ? c : '—'}</span>
+                                    ) : isDirector ? (
+                                      <textarea
+                                        value={c}
+                                        onChange={e => handleCommentChange(fid, t._id, e.target.value)}
+                                        placeholder="ملاحظات قائد الدراسة..."
+                                        style={{
+                                          width: 220,
+                                          minHeight: 34,
+                                          resize: 'vertical',
+                                          fontSize: 12,
+                                          padding: 6,
+                                          borderRadius: 6,
+                                          border: '1px solid #d1d5db',
+                                        }}
+                                      />
+                                    ) : (
+                                      <span style={{ fontSize: 12, color: '#111' }}>{c ? c : '—'}</span>
                                     )}
                                   </td>
                                 </tr>
@@ -679,7 +799,7 @@ export default function EvaluationFinale(): React.JSX.Element {
 
                       {saveErr && <div style={{ color: '#b91c1c' }}>❌ {saveErr}</div>}
 
-                      {/* ✅ Boutons : uniquement si PAS validated */}
+                      {/* ✅ Actions */}
                       {showDirectorSaveBtn && (
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                           <button
@@ -714,6 +834,26 @@ export default function EvaluationFinale(): React.JSX.Element {
                             onClick={() => startApprovalWithSignature('trainerApprove', fid)}
                           >
                             المصادقة على النتائج النهائية
+                          </button>
+                        </div>
+                      )}
+
+                      {/* ✅ Download when validated */}
+                      {showDownloadBtn && (
+                        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            style={{
+                              borderRadius: 999,
+                              border: 'none',
+                              padding: '6px 18px',
+                              background: '#111827',
+                              color: '#fff',
+                              fontSize: 13,
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => downloadResults(fid)}
+                          >
+                            تحميل بطاقة النتائج
                           </button>
                         </div>
                       )}
@@ -871,11 +1011,13 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'right',
     background: '#f9fafb',
     fontWeight: 700,
+    whiteSpace: 'nowrap',
   },
   td: {
     borderBottom: '1px solid #f3f4f6',
     padding: '6px 6px',
     textAlign: 'right',
+    verticalAlign: 'top',
   },
   eyeBtn: {
     width: 42,

@@ -32,6 +32,8 @@ const finalDecisionSchema = new mongoose.Schema(
       enum: ['success', 'retake', 'incompatible'],
       default: null,
     },
+    comment: { type: String, default: '', maxlength: 2000 },
+    commentedAt: { type: Date, default: null },
 
     // workflow
     status: {
