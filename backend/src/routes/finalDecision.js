@@ -231,7 +231,7 @@ async function buildFinalResultsReportData(formationId) {
 
   const approvalsByUser = new Map();
   for (const fd of decisionsDocs) {
-    for (const ap of (fd.approvals || [])) {
+    for (const ap of fd.approvals || []) {
       const uid = ap.user ? String(ap.user._id || ap.user) : null;
       if (!uid) continue;
 
@@ -370,9 +370,8 @@ async function buildFinalResultsReportData(formationId) {
 }
 
 /* =========================================================
- * ✅ ROUTE QUI SAUTAIT SOUVENT : GET /mine-formations
+ * GET /mine-formations
  * Liste des formations où je peux intervenir sur les décisions finales
- * (director/trainer/assistant/coach) — à toi d’ajuster si besoin.
  * ========================================================= */
 router.get('/mine-formations', requireAuth, async (req, res) => {
   try {
@@ -405,7 +404,7 @@ router.get('/mine-formations', requireAuth, async (req, res) => {
       out.push({
         formationId: fid,
         nom: f.nom || '',
-        myRole: row.role, // director/trainer/assistant/coach
+        myRole: row.role,
         sessionTitle: session.title || '',
         startDate: session.startDate || f.startDate || null,
         endDate: session.endDate || f.endDate || null,
@@ -786,9 +785,53 @@ router.get(
   }
 );
 
-/* ----------------- GET /formations/:formationId/report (PDF) ----------------- */
+/* ----------------- GET /formations/:formationId/report (PDF) -----------------
+   ✅ un seul endpoint: variant=full|light (full par défaut)
+   Exemple:
+   - /report
+   - /report?variant=light
+------------------------------------------------------------------- */
 router.get(
   '/formations/:formationId/report',
+  requireAuth,
+  [
+    param('formationId').isMongoId(),
+    query('variant').optional().isIn(['full', 'light']),
+  ],
+  async (req, res) => {
+    const e = bad(req, res);
+    if (e) return;
+
+    try {
+      const { formationId } = req.params;
+      const variant = req.query.variant === 'light' ? 'light' : 'full';
+
+      const data = await buildFinalResultsReportData(formationId);
+
+      const safeSession = (data.session?.title || 'session').replace(/[^\w\-ء-ي]+/g, '_');
+      const safeFormation = (data.formation?.nom || 'formation').replace(/[^\w\-ء-ي]+/g, '_');
+
+      const filename =
+        variant === 'light'
+          ? `resultats_light_${safeSession}_${safeFormation}.pdf`
+          : `resultats_${safeSession}_${safeFormation}.pdf`;
+
+      const pdfBuffer = await generateFinalResultsPdf(data, { variant });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+
+      return res.end(pdfBuffer);
+    } catch (err) {
+      console.error('GET /final-decisions/formations/:formationId/report ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur lors de la génération du PDF.' });
+    }
+  }
+);
+
+// GET /formations/:formationId/report-light (PDF LIGHT) ✅ garde l'endpoint existant
+router.get(
+  '/formations/:formationId/report-light',
   requireAuth,
   [param('formationId').isMongoId()],
   async (req, res) => {
@@ -799,19 +842,31 @@ router.get(
       const { formationId } = req.params;
       const data = await buildFinalResultsReportData(formationId);
 
-      const filename = `resultats_${data.session?.title || 'session'}_${data.formation?.nom || 'formation'}.pdf`;
-      const pdfBuffer = await generateFinalResultsPdf(data);
+      const safe = s =>
+        String(s || '')
+          .normalize('NFKD')
+          .replace(/[^\w.-]+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+          .slice(0, 80);
+
+      const sessionPart = safe(data.session?.title || 'session');
+      const formationPart = safe(data.formation?.nom || 'formation');
+
+      const filename = `resultats_light_${sessionPart}_${formationPart}.pdf`;
+
+      const pdfBuffer = await generateFinalResultsPdf(data, { variant: 'light' });
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${encodeURIComponent(filename)}"`
+        `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
       );
 
       return res.end(pdfBuffer);
     } catch (err) {
-      console.error('GET /final-decisions/formations/:formationId/report ERROR', err);
-      return res.status(500).json({ message: 'Erreur serveur lors de la génération du PDF.' });
+      console.error('GET /final-decisions/formations/:formationId/report-light ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur lors de la génération du PDF light.' });
     }
   }
 );

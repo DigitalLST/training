@@ -523,10 +523,40 @@ export default function EvaluationFinale(): React.JSX.Element {
   }
 
   // ✅ téléchargement (placeholder — remplace l’URL par ta route PDF quand elle existe)
-  async function downloadResults(fid: string) {
-    // Exemple: window.open(`${API_BASE}/final-decisions/formations/${fid}/pdf`, '_blank');
-    window.open(`${API_BASE}/final-decisions/formations/${fid}`, '_blank');
+  // ✅ téléchargement PDF (report-light)
+// ✅ téléchargement PDF (report-light) AVEC Authorization header
+async function downloadResults(fid: string) {
+  try {
+    const url = `${API_BASE}/final-decisions/formations/${fid}/report-light?ts=${Date.now()}`;
+
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: headers(),     // ✅ envoie Bearer token
+      cache: 'no-store',
+    });
+
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+    const blob = await r.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+
+    // 1) téléchargement direct (recommandé)
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = `resultats_light_${fid}.pdf`; // ou un nom plus joli
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    // 2) (optionnel) ouvrir dans un nouvel onglet
+    // window.open(blobUrl, '_blank', 'noopener,noreferrer');
+
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10_000);
+  } catch (e: any) {
+    alert(e?.message || 'تعذّر تحميل ملف PDF');
   }
+}
+
 
   return (
     <div dir="rtl" style={{ width: '70vw', paddingInline: 24, marginLeft: 20 }}>

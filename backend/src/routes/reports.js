@@ -318,6 +318,34 @@ router.get(
     }
   }
 );
+/* ----------------- GET /formations/:formationId/report (PDF) ----------------- */
+
+router.get(
+  '/formations/:formationId/report',
+  requireAuth,
+  [param('formationId').isMongoId()],
+  async (req, res) => {
+    const e = validationResult(req);
+    if (!e.isEmpty()) return res.status(400).json({ errors: e.array() });
+
+    try {
+      const { formationId } = req.params;
+      const data = await buildFinalResultsReportData(formationId);
+
+      const filename = `resultats_${data.session?.title || 'session'}_${data.formation?.nom || 'formation'}.pdf`;
+
+      const pdfBuffer = await generateFinalResultsPdf(data);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+
+      return res.end(pdfBuffer);
+    } catch (err) {
+      console.error('GET /final-decisions/formations/:formationId/report ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur lors de la génération du PDF.' });
+    }
+  }
+);
 
 
 

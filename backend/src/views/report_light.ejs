@@ -463,113 +463,6 @@
     </table>
   <% } %>
 
-  <!-- 🔹 PAGE RAPPORT COACH (inchangé) -->
-  <% if (coachReport) { %>
-    <div class="page-break"></div>
-
-    <div class="section-title">تقرير المرشد الفني</div>
-
-    <div class="report-block-title">1. ملاحظات حول قائد الدراسة</div>
-    <div class="report-block-text">
-      <%= coachReport.block1 || '' %>
-    </div>
-
-    <div class="report-block-title">2. ملاحظات حول قيادة الدراسة</div>
-    <div class="report-block-text">
-      <%= coachReport.block2 || '' %>
-    </div>
-
-    <div class="report-block-title">3. ملاحظات عامة وتوصيات</div>
-    <div class="report-block-text">
-      <%= coachReport.block3 || '' %>
-    </div>
-
-    <table class="signatures-table report-signature">
-      <tbody>
-        <tr>
-          <td>
-            <div><strong>المرشد الفني</strong></div>
-            <div>
-              <%= (coachReport.prenom || '') + ' ' + (coachReport.nom || '') %>
-            </div>
-          </td>
-          <td>
-            <% if (coachReport.signedAt) { %>
-              <div>
-                تاريخ الإمضاء :
-                <%= new Date(coachReport.signedAt).toLocaleDateString('ar-TN', {
-                  year: 'numeric',
-                  month: '2-digit',
-                  day: '2-digit'
-                }) %>
-              </div>
-            <% } else if (coachReport.updatedAt) { %>
-              <div>
-                آخر تحديث :
-                <%= new Date(coachReport.updatedAt).toLocaleDateString('ar-TN', {
-                  year: 'numeric',
-                  month: '2-digit',
-                  day: '2-digit'
-                }) %>
-              </div>
-            <% } %>
-          </td>
-          <td>
-            <% if (coachReport.signatureDataUrl) { %>
-              <div><img src="<%= coachReport.signatureDataUrl %>" /></div>
-            <% } %>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  <% } %>
-
-  <!-- ✅ AJOUT: Signatures CN sur la DERNIÈRE PAGE du rapport -->
-  <% if (cnPresident || cnCommissioner) { %>
-    <div class="page-break"></div>
-    <div class="section-title"> المصادقة النهائية</div>
-    <table class="signatures-table">
-      <tbody>
-        <% if (cnCommissioner) { %>
-          <tr>
-            <td>
-              <div><strong><%= cnCommissioner.roleLabel %></strong></div>
-              <div><%= (cnCommissioner.prenom || '') %> <%= (cnCommissioner.nom || '') %></div>
-            </td>
-            <td>
-              <% if (cnCommissioner.validatedAtText) { %>
-                <div>تاريخ المصادقة : <%= cnCommissioner.validatedAtText %></div>
-              <% } %>
-            </td>
-            <td>
-              <% if (cnCommissioner.signatureDataUrl) { %>
-                <div><img src="<%= cnCommissioner.signatureDataUrl %>" /></div>
-              <% } %>
-            </td>
-          </tr>
-        <% } %>
-
-        <% if (cnPresident) { %>
-          <tr>
-            <td>
-              <div><strong><%= cnPresident.roleLabel %></strong></div>
-              <div><%= (cnPresident.prenom || '') %> <%= (cnPresident.nom || '') %></div>
-            </td>
-            <td>
-              <% if (cnPresident.validatedAtText) { %>
-                <div>تاريخ المصادقة : <%= cnPresident.validatedAtText %></div>
-              <% } %>
-            </td>
-            <td>
-              <% if (cnPresident.signatureDataUrl) { %>
-                <div><img src="<%= cnPresident.signatureDataUrl %>" /></div>
-              <% } %>
-            </td>
-          </tr>
-        <% } %>
-      </tbody>
-    </table>
-  <% } %>
-
+ 
 </body>
 </html>
