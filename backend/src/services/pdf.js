@@ -265,11 +265,12 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
   const html = await ejs.renderFile(templatePath, data, { async: true });
   console.log('HTML LENGTH:', html.length);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    args: ['--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
-  });
+const browser = await puppeteer.launch({
+  headless: true,
+  // ✅ ne force pas un Chrome local
+  // executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  args: ['--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
+});
 
   const page = await browser.newPage();
 
