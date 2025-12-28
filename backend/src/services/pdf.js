@@ -1,3 +1,4 @@
+// src/services/pdf.js
 const puppeteer = require('puppeteer');
 const ejs = require('ejs');
 const path = require('path');
@@ -103,7 +104,9 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     const startStr = session.startDate
       ? new Date(session.startDate).toLocaleDateString('ar-TN')
       : '';
-    const endStr = session.endDate ? new Date(session.endDate).toLocaleDateString('ar-TN') : '';
+    const endStr = session.endDate
+      ? new Date(session.endDate).toLocaleDateString('ar-TN')
+      : '';
     data.periodLine = `من ${startStr} إلى ${endStr}`;
   } else {
     data.periodLine = '';
@@ -265,28 +268,29 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
   const html = await ejs.renderFile(templatePath, data, { async: true });
   console.log('HTML LENGTH:', html.length);
 
-const browser = await puppeteer.launch({
-  headless: true,
-  // ✅ ne force pas un Chrome local
-  // executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  args: ['--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
-});
-
-  const page = await browser.newPage();
-
-  // ⚠️ important: attend le chargement complet (fonts / images)
-  await page.setContent(html, { waitUntil: 'networkidle0' });
-
-  const pdfBuffer = await page.pdf({
-    format: 'A4',
-    printBackground: true,
-    margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+  // ✅ IMPORTANT: ne force pas Chrome local => Puppeteer utilisera Chromium
+  const browser = await puppeteer.launch({
+    headless: true, // ou 'new' selon ta version
+    args: ['--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
   });
 
-  console.log('PDF BUFFER SIZE:', pdfBuffer.length);
+  try {
+    const page = await browser.newPage();
 
-  await browser.close();
-  return pdfBuffer;
+    // ⚠️ important: attend le chargement complet (fonts / images)
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+
+    console.log('PDF BUFFER SIZE:', pdfBuffer.length);
+    return pdfBuffer;
+  } finally {
+    await browser.close();
+  }
 }
 
 module.exports = { generateFinalResultsPdf };

@@ -68,7 +68,7 @@ export default function SignatureModal({ open, onClose, onSave }: SignatureModal
         <div
           style={{
             marginTop: 8,
-            display: 'flex',
+            display: 'grid',
             justifyContent: 'space-between',
             gap: 8,
           }}
