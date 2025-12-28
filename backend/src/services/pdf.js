@@ -1,5 +1,6 @@
 // src/services/pdf.js
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const ejs = require('ejs');
 const path = require('path');
 const fs = require('fs');
@@ -61,13 +62,63 @@ function readSignatureDataUrl(signatureUrl) {
 }
 
 /**
+ * Détecte si on est sur Render/Prod
+ * (tu peux ajouter d'autres flags si besoin)
+ */
+function isProdLike() {
+  return (
+    process.env.RENDER ||
+    process.env.NODE_ENV === 'production' ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.VERCEL
+  );
+}
+
+/**
+ * ✅ Lance un browser compatible Render (Sparticuz chromium)
+ * + fallback local si jamais chromium.executablePath() échoue
+ */
+async function launchBrowser() {
+  // Sur Render / prod : on utilise Sparticuz
+  if (isProdLike()) {
+    const executablePath = await chromium.executablePath();
+    return puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+    });
+  }
+
+  // Local : Sparticuz marche aussi, mais parfois tu préfères un Chrome installé.
+  // On tente Sparticuz d'abord, puis fallback sans executablePath (si tu as un Chrome local détectable).
+  try {
+    const executablePath = await chromium.executablePath();
+    return puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: true,
+      ignoreHTTPSErrors: true,
+    });
+  } catch (e) {
+    console.warn('chromium.executablePath() failed locally, fallback:', e?.message || e);
+    return puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      ignoreHTTPSErrors: true,
+    });
+  }
+}
+
+/**
  * @param {object} rawData - data “brut” venant de buildFinalResultsReportData
  * @param {object} opts
  * @param {'full'|'light'} [opts.variant] - default: 'full'
- * @param {boolean} [opts.light] - alias (si tu avais déjà un appel existant)
+ * @param {boolean} [opts.light] - alias
  */
 async function generateFinalResultsPdf(rawData, opts = {}) {
-  // ✅ robust: accepte opts.variant, ou opts.light, défaut full
   const variant =
     (opts && opts.variant === 'light') || (opts && opts.light === true) ? 'light' : 'full';
 
@@ -77,14 +128,11 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
   console.log('PDF VARIANT:', variant);
   console.log('TEMPLATE PATH:', templatePath);
 
-  // clone pour ne pas muter l’original
   const data = JSON.parse(JSON.stringify(rawData || {}));
 
-  // ✅ light: on neutralise ce qui ne doit pas apparaître (évite toute régression)
+  // ✅ light: on neutralise ce qui ne doit pas apparaître
   if (variant === 'light') {
     data.coachReport = null;
-
-    // si tu veux enlever complètement CN partout en light, décommente:
     // data.cnPresident = null;
     // data.cnCommissioner = null;
   }
@@ -104,9 +152,7 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     const startStr = session.startDate
       ? new Date(session.startDate).toLocaleDateString('ar-TN')
       : '';
-    const endStr = session.endDate
-      ? new Date(session.endDate).toLocaleDateString('ar-TN')
-      : '';
+    const endStr = session.endDate ? new Date(session.endDate).toLocaleDateString('ar-TN') : '';
     data.periodLine = `من ${startStr} إلى ${endStr}`;
   } else {
     data.periodLine = '';
@@ -254,7 +300,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
   });
 
   // ✅ CN president/commissioner (date + signature base64)
-  // (utile si tu gardes le footer CN sur full/light)
   if (data.cnPresident) {
     data.cnPresident.validatedAtText = toDateStrAr(data.cnPresident.validatedAt);
     data.cnPresident.signatureDataUrl = readSignatureDataUrl(data.cnPresident.signatureUrl);
@@ -268,16 +313,12 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
   const html = await ejs.renderFile(templatePath, data, { async: true });
   console.log('HTML LENGTH:', html.length);
 
-  // ✅ IMPORTANT: ne force pas Chrome local => Puppeteer utilisera Chromium
-  const browser = await puppeteer.launch({
-    headless: true, // ou 'new' selon ta version
-    args: ['--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();
 
-    // ⚠️ important: attend le chargement complet (fonts / images)
+    // Important: attends le chargement (fonts/images base64 ok)
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
     const pdfBuffer = await page.pdf({
