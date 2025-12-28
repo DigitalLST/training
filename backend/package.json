@@ -9,6 +9,7 @@
     "start": "node src/app.js"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^143.0.0",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
@@ -24,6 +25,7 @@
     "pdfkit": "^0.17.2",
     "pdfmake": "^0.2.20",
     "puppeteer": "^24.31.0",
+    "puppeteer-core": "^24.34.0",
     "xss": "^1.0.15"
   },
   "devDependencies": {
