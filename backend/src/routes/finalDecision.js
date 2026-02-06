@@ -985,51 +985,60 @@ router.get(
 
       const baseData = await buildSessionResultsReportData(sessionId);
 
-      // group by region
+      // 1) group by region
       const byRegion = new Map();
-      for (const t of (baseData.trainees || [])) {
+      for (const t of baseData.trainees || []) {
         const region = String(t.region || 'UNKNOWN').trim() || 'UNKNOWN';
         if (!byRegion.has(region)) byRegion.set(region, []);
         byRegion.get(region).push(t);
       }
-      // helpers (à mettre au début du handler, avant l'utilisation)
+
+      // helpers
       function pad2(n) {
         const x = Number(n) || 0;
-        return x < 10 ? `0${x}` : String(x)
+        return x < 10 ? `0${x}` : String(x);
       }
+
       function leadershipMonthFromStartDate(startDate) {
         const d = startDate ? new Date(startDate) : null;
         if (!d || Number.isNaN(d.getTime())) return 'leadership_unknown';
-        const y = d.getFullYear();
-        const m = pad2(d.getMonth() + 1);
-        return `leadership_${y}_${m}`;
+        return `leadership_${d.getFullYear()}_${pad2(d.getMonth() + 1)}`;
       }
-      // ✅ safe pour noms de fichiers à l’intérieur du ZIP (pdf par région)
-      const safe = (s) =>
-        String(s || '')
-      .normalize('NFKD')
-      .replace(/[\r\n"]/g, '')          // sécurité
-      .replace(/[^\w\-ء-ي]+/g, '_')     // garde AR + word chars
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 80);
+
+      // ✅ safe filename for entries inside ZIP (allow AR, remove bad header chars)
+      function safe(s) {
+        return String(s || '')
+          .normalize('NFKD')
+          .replace(/[\r\n"]/g, '') // avoid header/file issues
+          .replace(/[^\w\-ء-ي]+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+          .slice(0, 80);
+      }
+
+      // 2) headers ZIP (ASCII only => no ERR_INVALID_CHAR)
       const baseName = leadershipMonthFromStartDate(baseData.session?.startDate);
       const zipName = `${baseName}.zip`;
+
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="${zipName}"; filename*=UTF-8''${encodeURIComponent(zipName)}`
       );
 
-
       const archive = archiver('zip', { zlib: { level: 9 } });
+
       archive.on('error', err => {
         console.error('ZIP ERROR', err);
-        res.status(500).end();
+        try {
+          if (!res.headersSent) res.status(500);
+          res.end();
+        } catch (_) {}
       });
+
       archive.pipe(res);
 
-      // ✅ 2 niveaux fixes (selon FormationSchema)
+      // 3) build PDFs
       const LEVELS = ['تمهيدية', 'شارة خشبية'];
       const isSuccess = t => t.decision === 'success';
       const isNonSuccess = t => t.decision !== 'success';
@@ -1037,7 +1046,7 @@ router.get(
       for (const [region, list] of byRegion.entries()) {
         const pages = [];
 
-        // 2 premières pages : success
+        // 2 pages success
         for (const lvl of LEVELS) {
           pages.push({
             bucket: 'success',
@@ -1047,7 +1056,7 @@ router.get(
           });
         }
 
-        // 2 dernières pages : non-success
+        // 2 pages non-success
         for (const lvl of LEVELS) {
           pages.push({
             bucket: 'nonsuccess',
@@ -1074,9 +1083,25 @@ router.get(
           pages,
         };
 
-        const pdfBuffer = await generatePdfFromTemplate(regionData, 'report_by_region.ejs');
+        const out = await generatePdfFromTemplate(regionData, 'report_by_region.ejs');
 
-        archive.append(pdfBuffer, { name: `results_${safe(region)}.pdf` });
+        // ✅ IMPORTANT: convert to real Buffer for archiver
+        let pdfBuf = out;
+        if (!Buffer.isBuffer(pdfBuf)) {
+          // Uint8Array / ArrayBuffer-like
+          try {
+            pdfBuf = Buffer.from(pdfBuf);
+          } catch (convErr) {
+            console.error('PDF type invalid', {
+              region,
+              typeofOut: typeof out,
+              isBuffer: Buffer.isBuffer(out),
+            });
+            throw new Error(`PDF generation returned invalid type for region=${region}`);
+          }
+        }
+
+        archive.append(pdfBuf, { name: `results_${safe(region)}.pdf` });
       }
 
       await archive.finalize();
