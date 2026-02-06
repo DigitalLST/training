@@ -70,7 +70,7 @@ export default function MainLayout(): React.JSX.Element {
             )}
             {canAccessModeratorRegional(user) && (
                         <>
-              <MenuLink to='/moderatorregion'>فضاء اللجنة الجهوية </MenuLink>
+              <MenuLink to='/region'>فضاء اللجنة الجهوية </MenuLink>
             </>
             )}
 

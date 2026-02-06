@@ -10,6 +10,9 @@ const Formation = require('../models/formation');
 const SessionAffectation = require('../models/affectation');
 const FormationReport = require('../models/formationReport');
 const Session = require('../models/session');
+const Demande = require('../models/demande'); 
+const archiver = require('archiver');
+const { generatePdfFromTemplate } = require('../services/pdf');
 
 const { generateFinalResultsPdf } = require('../services/pdf');
 
@@ -364,6 +367,105 @@ async function buildFinalResultsReportData(formationId) {
       anyTrainerApproved,
       allTeamApproved,
     },
+    cnPresident,
+    cnCommissioner,
+  };
+}
+async function buildSessionResultsReportData(sessionId) {
+  // Session + validations CN
+  const sessionDoc = await Session.findById(sessionId)
+    .select('title startDate endDate organizer validations')
+    .populate('validations.president.validatedBy', 'prenom nom signatureUrl')
+    .populate('validations.commissioner.validatedBy', 'prenom nom signatureUrl')
+    .lean();
+
+  if (!sessionDoc) {
+    const err = new Error('Session introuvable');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // CN
+  let cnPresident = null;
+  let cnCommissioner = null;
+
+  const pres = sessionDoc?.validations?.president || null;
+  const comm = sessionDoc?.validations?.commissioner || null;
+
+  if (pres?.isValidated && pres?.validatedBy) {
+    cnPresident = {
+      role: 'cn_president',
+      roleLabel: 'رئيس اللجنة الوطنية',
+      prenom: pres.validatedBy?.prenom || '',
+      nom: pres.validatedBy?.nom || '',
+      validatedAt: pres.validatedAt || null,
+      signatureUrl: pres.validatedBy?.signatureUrl || null,
+    };
+  }
+  if (comm?.isValidated && comm?.validatedBy) {
+    cnCommissioner = {
+      role: 'cn_commissioner',
+      roleLabel: 'القائد العام',
+      prenom: comm.validatedBy?.prenom || '',
+      nom: comm.validatedBy?.nom || '',
+      validatedAt: comm.validatedAt || null,
+      signatureUrl: comm.validatedBy?.signatureUrl || null,
+    };
+  }
+
+  // Demandes de la session (source vérité pour branche + snapshot identité/région)
+  const demandes = await Demande.find({ session: sessionId })
+    .select('applicant applicantSnapshot branche')
+    .lean();
+
+  const demandeByApplicant = new Map();
+  for (const d of demandes) {
+    demandeByApplicant.set(String(d.applicant), {
+      idScout: d.applicantSnapshot?.idScout || '',
+      prenom: d.applicantSnapshot?.firstName || '',
+      nom: d.applicantSnapshot?.lastName || '',
+      region: d.applicantSnapshot?.region || '',
+      branche: d.branche || '',
+    });
+  }
+
+  // Final decisions de la session + formation join (pour niveau + nom formation)
+  // ✅ si tu veux seulement les validées: ajoute status:'validated'
+  const fds = await FinalDecision.find({ session: sessionId /*, status:'validated'*/ })
+    .select('trainee formation decision status')
+    .populate({ path: 'formation', select: 'nom niveau' })
+    .lean();
+
+  const trainees = [];
+  for (const fd of fds) {
+    const traineeId = String(fd.trainee);
+    const d = demandeByApplicant.get(traineeId);
+
+    if (!d) continue; // pas de demande => on skip (ou fallback si tu veux)
+
+    trainees.push({
+      traineeId,
+      idScout: d.idScout,
+      prenom: d.prenom,
+      nom: d.nom,
+      region: d.region,
+      branche: d.branche,                        // ✅ demande
+      trainingLevel: fd.formation?.niveau || '—',// ✅ formation
+      formationTitle: fd.formation?.nom || '—',
+      decision: fd.decision || null,
+      status: fd.status || 'draft',
+    });
+  }
+
+  return {
+    session: {
+      title: sessionDoc.title || '',
+      startDate: sessionDoc.startDate || null,
+      endDate: sessionDoc.endDate || null,
+      organizer: sessionDoc.organizer || '',
+    },
+    sessionTitle: sessionDoc.title || '',
+    trainees,
     cnPresident,
     cnCommissioner,
   };
@@ -870,5 +972,107 @@ router.get(
     }
   }
 );
+router.get(
+  '/sessions/:sessionId/report-by-region.zip',
+  requireAuth,
+  [param('sessionId').isMongoId()],
+  async (req, res) => {
+    const e = bad(req, res);
+    if (e) return;
+
+    try {
+      const { sessionId } = req.params;
+
+      const baseData = await buildSessionResultsReportData(sessionId);
+
+      // group by region
+      const byRegion = new Map();
+      for (const t of (baseData.trainees || [])) {
+        const region = String(t.region || 'UNKNOWN').trim() || 'UNKNOWN';
+        if (!byRegion.has(region)) byRegion.set(region, []);
+        byRegion.get(region).push(t);
+      }
+
+      const safe = s =>
+        String(s || '')
+          .normalize('NFKD')
+          .replace(/[^\w\-ء-ي]+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+          .slice(0, 80);
+
+      const zipName = `results_by_region_${safe(baseData.session?.title || 'session')}.zip`;
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${zipName}"; filename*=UTF-8''${encodeURIComponent(zipName)}`
+      );
+
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.on('error', err => {
+        console.error('ZIP ERROR', err);
+        res.status(500).end();
+      });
+      archive.pipe(res);
+
+      // ✅ 2 niveaux fixes (selon FormationSchema)
+      const LEVELS = ['تمهيدية', 'شارة خشبية'];
+      const isSuccess = t => t.decision === 'success';
+      const isNonSuccess = t => t.decision !== 'success';
+
+      for (const [region, list] of byRegion.entries()) {
+        const pages = [];
+
+        // 2 premières pages : success
+        for (const lvl of LEVELS) {
+          pages.push({
+            bucket: 'success',
+            trainingLevel: lvl,
+            title: `النتائج - ${region} - (${lvl}) - المؤهلون`,
+            trainees: list.filter(t => t.trainingLevel === lvl && isSuccess(t)),
+          });
+        }
+
+        // 2 dernières pages : non-success
+        for (const lvl of LEVELS) {
+          pages.push({
+            bucket: 'nonsuccess',
+            trainingLevel: lvl,
+            title: `النتائج - ${region} - (${lvl}) - غير المؤهلين`,
+            trainees: list.filter(t => t.trainingLevel === lvl && isNonSuccess(t)),
+          });
+        }
+
+        const statsByLevel = LEVELS.map(lvl => {
+          const lvlList = list.filter(t => t.trainingLevel === lvl);
+          return {
+            trainingLevel: lvl,
+            total: lvlList.length,
+            success: lvlList.filter(isSuccess).length,
+            nonsuccess: lvlList.filter(isNonSuccess).length,
+          };
+        });
+
+        const regionData = {
+          ...baseData,
+          exportRegion: region,
+          statsByLevel,
+          pages,
+        };
+
+        const pdfBuffer = await generatePdfFromTemplate(regionData, 'report_by_region.ejs');
+
+        archive.append(pdfBuffer, { name: `results_${safe(region)}.pdf` });
+      }
+
+      await archive.finalize();
+    } catch (err) {
+      console.error('GET /sessions/:sessionId/report-by-region.zip ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur lors de la génération du ZIP.' });
+    }
+  }
+);
+
 
 module.exports = router;

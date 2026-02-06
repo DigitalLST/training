@@ -6,19 +6,20 @@ type SessionRow = {
   title: string;
   period: string;
   visible: boolean;
+  organizer?: string;
   trainingLevels: string[];
   branches: string[];
 };
 
 // titre affiché en haut selon la route
 const PAGE_TITLES: Record<string, string> = {
-  '/moderator/': '',
+  '/region/': '',
 };
 
 const RED = '#e20514';
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 
-export default function NouveauParticipant(): React.JSX.Element {
+export default function GestionParticipation(): React.JSX.Element {
   const nav = useNavigate();
   const { pathname } = useLocation();
 
@@ -26,7 +27,6 @@ export default function NouveauParticipant(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // --- HEADERS (token facultatif) ---
   function authHeaders(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     const t = localStorage.getItem('token');
@@ -34,17 +34,11 @@ export default function NouveauParticipant(): React.JSX.Element {
     return h;
   }
 
-  // --- LISTE SESSIONS ---
   useEffect(() => {
     (async () => {
       try {
-        setLoading(true); setErr(null);
-        const res = await fetch(`${API_BASE}/sessions?ts=${Date.now()}`, {
-          headers: authHeaders(),
-          cache: 'no-store',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as any[];
+        setLoading(true);
+        setErr(null);
 
         const fmtMonth = (iso?: string) =>
           iso ? new Date(iso).toLocaleDateString('ar-TN', { year: 'numeric', month: 'long' }) : '—';
@@ -52,11 +46,44 @@ export default function NouveauParticipant(): React.JSX.Element {
         const normArray = (v: any): string[] =>
           Array.isArray(v) ? v.map(String).map(s => s.trim()).filter(Boolean) : [];
 
+        async function fetchSessionsPreferRegional(): Promise<any[]> {
+          // 1) try /sessions/regional
+          const r1 = await fetch(`${API_BASE}/sessions/regional?ts=${Date.now()}`, {
+            headers: authHeaders(),
+            cache: 'no-store',
+          });
+
+          if (r1.ok) return (await r1.json()) as any[];
+
+          // fallback if route not deployed yet
+          if (r1.status === 404) {
+            const r2 = await fetch(`${API_BASE}/sessions?ts=${Date.now()}`, {
+              headers: authHeaders(),
+              cache: 'no-store',
+            });
+            if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+            return (await r2.json()) as any[];
+          }
+
+          throw new Error(`HTTP ${r1.status}`);
+        }
+
+        const data = await fetchSessionsPreferRegional();
+
         const mapped: SessionRow[] = data.map((s) => {
           const trainingLevels =
             normArray(s.trainingLevels ?? s.trainingLevel ?? s.levels ?? s.level);
           const branches =
             normArray(s.branche ?? s.branches ?? s.branch);
+          const organizer = String(
+            s.organizer ??
+              s.organizerRegion ??
+              s.organizerName ??
+              s.organiser ??
+              s.regionOrganizer ??
+              ''
+          ).trim();
+
           return {
             id: String(s._id ?? s.id),
             title: String(s.title ?? '').trim(),
@@ -64,11 +91,11 @@ export default function NouveauParticipant(): React.JSX.Element {
             visible: Boolean(s.isVisible ?? s.isvisible ?? false),
             trainingLevels,
             branches,
+            organizer,
           };
         });
-        const allowed = new Set(['تمهيدية', 'شارة خشبية']);
-        const filtered = mapped.filter(r => r.trainingLevels.some(lvl => allowed.has(lvl)));
-        setRows(filtered);
+
+        setRows(mapped);
       } catch (e: any) {
         setErr(e.message || 'تعذر الجلب');
       } finally {
@@ -77,28 +104,20 @@ export default function NouveauParticipant(): React.JSX.Element {
     })();
   }, []);
 
-  // navigation vers la page critères avec session & niveau
-function goToCriteres(sessionId: string, niveau: string) {
-  // Sauvegarde en fallback si l’utilisateur fait F5 sur la page cible
-  sessionStorage.setItem('criteres:selection', JSON.stringify({ sessionId, niveau }));
-
-  // Navigation sans query ni id dans l'URL
-  nav('/moderator/listeparticipants', {
-    state: { sessionId, niveau } as { sessionId: string; niveau: string },
-    replace: false,
-  });
-}
-
-  function onBack() {
-    nav('/moderator/');
+  function goToCriteres(sessionId: string, niveau: string) {
+    sessionStorage.setItem('criteres:selection', JSON.stringify({ sessionId, niveau }));
+    nav('/region/listeparticipants', {
+      state: { sessionId, niveau } as { sessionId: string; niveau: string },
+      replace: false,
+    });
   }
 
-
+  function onBack() {
+    nav('/region/');
+  }
 
   const pageTitle = PAGE_TITLES[pathname] ?? '';
 
-
-  // boutons cliquables (niveaux)
   const renderLevelButtons = (sessionId: string, levels: string[]) => {
     if (!levels?.length) return <span style={{ opacity: 0.6 }}>—</span>;
     return (
@@ -148,8 +167,11 @@ function goToCriteres(sessionId: string, niveau: string) {
           <div key={row.id} style={styles.item} dir="rtl">
             <div style={styles.itemRight}>
               <div style={styles.itemTitle}>{row.title} - {row.period}</div>
+              <div style={styles.metaLine}>
+                <span style={styles.metaLabel}>الجهة المنظمة:</span>
+                <span style={styles.metaLabel}>{row.organizer || '—'}</span>
+              </div>
 
-              {/* bloc infos */}
               <div style={styles.metaBlock}>
                 <div style={styles.metaLine}>
                   <span style={styles.metaLabel}>المستوى التدريبي:</span>
@@ -158,8 +180,6 @@ function goToCriteres(sessionId: string, niveau: string) {
               </div>
             </div>
 
-            {/* Zone actions: on garde l'espace pour la cohérence visuelle,
-                mais on ne propose ni modifier, ni supprimer ici */}
             <div style={styles.actions} />
           </div>
         ))}
@@ -200,8 +220,8 @@ const styles: Record<string, React.CSSProperties> = {
   metaLine: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   metaLabel: { fontSize: 13, color: '#6b7280' },
 
-  // badges non cliquables
   badges: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+
   badge: {
     fontSize: 12,
     padding: '3px 8px',
@@ -211,7 +231,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#374151',
   },
 
-  // boutons niveaux cliquables (mêmes dimensions que badges)
   badgeButton: {
     fontSize: 12,
     padding: '4px 10px',
@@ -226,5 +245,17 @@ const styles: Record<string, React.CSSProperties> = {
   actions: { display: 'flex', gap: 18, color: '#0f172a', alignItems: 'center' },
 };
 
-/* ---------- icônes ---------- */
-function ArrowRightIcon() { return (<svg width="22" height="22" viewBox="0 0 24 24"><path d="M8 5l8 7-8 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
+function ArrowRightIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24">
+      <path
+        d="M8 5l8 7-8 7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

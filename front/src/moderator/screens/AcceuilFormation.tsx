@@ -66,8 +66,10 @@ export default function Acceuilormation(): React.JSX.Element {
             branches,
           };
         });
+        const allowed = new Set(['تمهيدية', 'شارة خشبية']);
+        const filtered = mapped.filter(r => r.trainingLevels.some(lvl => allowed.has(lvl)));
+        setRows(filtered);
 
-        setRows(mapped);
       } catch (e: any) {
         setErr(e.message || 'تعذر الجلب');
       } finally {

@@ -50,6 +50,13 @@ import GestionAdmins from './admin/screens/ManageAdmins';
 import GestionUsers from './admin/screens/ManageUsers';
 import AdminUpdateEval from './admin/screens/UpdateEval';
 import AdminResultsValidation from './admin/screens/َApprobationResultat';
+import RegionLayout from './layouts/Region';
+import HomeRegion from './region/screens/Home';
+import DemandeSession from './region/screens/DemandeSession';
+import AjoutSession from './region/screens/AjoutSession';
+import ValidationSessionRegion from'./moderator/screens/ValidationSessionRegion';
+import GestionParticipation from './region/screens/GestionParticipation';
+import ListeParticipants from './region/screens/ListeParticpant';
 
 export default function App() {
   return (
@@ -83,10 +90,37 @@ export default function App() {
       <Route path="forgot" element={<MainLayout />}>
         <Route index element={<ForgotPwd />} />
       </Route>
+      <Route path="/reset" element={<MainLayout />}>
+        <Route index element={<ResetPwd />} />
+      </Route>
 
       <Route path="reset/:token" element={<MainLayout />}>
         <Route index element={<ResetPwd />} />
       </Route>
+
+
+
+      <Route element={<RequireAuth />}>
+        <Route
+          path="/region/*"
+          element={
+            <ProtectedSection section="moderator_regional">
+              <RegionLayout />
+            </ProtectedSection>
+          }
+        >
+          <Route index element={<HomeRegion />} />
+        <Route path="demandes" element={<DemandeSession />} />
+        <Route path="demandes/new" element={<AjoutSession />} />
+        <Route path="gestionparticipants" element={<GestionParticipation />} />
+        <Route path="listeparticipants" element={<ListeParticipants />} />
+
+
+        </Route>
+
+
+      </Route>
+
 
       <Route element={<RequireAuth />}>
         {/* ----- Moderator ----- */}
@@ -122,6 +156,7 @@ export default function App() {
           <Route path="detailresults" element={<ResultatDetailModerator />} />
           <Route path="rapportdirecteur" element={<ModeratorDirectorReport />} />
           <Route path="rapportcoach" element={<ModeratorCoachReport />} />
+          <Route path="demanderegion" element={<ValidationSessionRegion />} />
 
 
         </Route> 

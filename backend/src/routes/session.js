@@ -2,6 +2,10 @@
 const mongoose = require('mongoose');  
 const router = require('express').Router();
 const Session = require('../models/session');
+const Demande = require('../models/demande');
+const requireAuth = require('../middlewares/auth');
+const normalize = (v) => String(v || '').trim();
+const NATIONAL_ORG = 'اللجنة الوطنية لتنمية القيادات';
 
 // POST /api/sessions : créer une session
 // routes/sessions.js (extrait POST)
@@ -47,6 +51,43 @@ router.get('/', async (_req, res) => {
   const sessions = await Session.find().sort({ startDate: -1 });
   res.json(sessions);
 });
+
+// GET /api/sessions/regional
+// Retourne:
+// - sessions organisées par ma région
+// - OU sessions organisées par اللجنة الوطنية لتنمية القيادات
+// - OU sessions où il existe au moins une demande (Demande) d’un participant de ma région
+router.get('/regional', requireAuth, async (req, res, next) => {
+  try {
+    const userRegion = normalize(req.user?.region);
+    if (!userRegion) return res.status(403).json({ error: 'Missing user region' });
+
+    // 1) Sessions où j’ai au moins 1 demandeur de ma région
+    const demandeSessionIds = await Demande.distinct('session', {
+      'applicantSnapshot.region': userRegion,
+    });
+
+    // 2) Sessions organisées par ma région OU National
+    // + sessions “cross-region” où j’ai des demandeurs
+    const organizerOr = [userRegion, NATIONAL_ORG];
+
+    const sessions = await Session.find({
+      $or: [
+        { organizer: { $in: organizerOr } },
+        { organizerRegion: { $in: organizerOr } },
+        { organizerName: { $in: organizerOr } },
+        { _id: { $in: demandeSessionIds.filter(id => mongoose.Types.ObjectId.isValid(id)) } },
+      ],
+    })
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+
+    return res.json(sessions);
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 // GET /api/sessions/:id : détail
 router.get('/:id', async (req, res, next) => {

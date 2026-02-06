@@ -23,6 +23,8 @@ const reportRoutes = require('../src/routes/reports');
 const adminRoutes = require('../src/routes/admins');
 const adminEvaluationsRouter = require('../src/routes/adminEvaluations');
 const adminResultsRouter = require('../src/routes/adminResults');
+const demandeRegion=require("./routes/demandeRegions")
+
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -54,6 +56,7 @@ app.use(
   express.static(path.join(__dirname, SIGNATURE_DIR))
 );
 app.use('/api', meRoutes);
+app.use('/api/region-session-requests',demandeRegion)
 app.set('etag', false); 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 

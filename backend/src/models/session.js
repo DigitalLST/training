@@ -1,7 +1,14 @@
 // models/session.js
 const mongoose = require('mongoose');
 
-
+const TRAINING_LEVELS = [
+  "تمهيدية",
+  "شارة خشبية",
+  "S1",
+  "S2",
+  "S3",
+  "الدراسة الابتدائية"
+];
 const SessionSchema = new mongoose.Schema({
   title:       { type: String, required: true },
   startDate:   { type: Date,   required: true },
@@ -11,7 +18,7 @@ const SessionSchema = new mongoose.Schema({
 
   trainingLevels: {
     type: [String],
-    enum: ['شارة خشبية', 'تمهيدية'],
+    enum: TRAINING_LEVELS,
     default: [],
     required: true,
     validate: v => Array.isArray(v) && v.length > 0
@@ -43,7 +50,7 @@ const SessionSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-SessionSchema.index({ title: 1 }, { unique: true });
+SessionSchema.index({ title: 1,organizer:1,startDate:1,endDate:1 }, { unique: true });
 
 SessionSchema.pre('save', function (next) {
   if (this.isModified('title') && typeof this.title === 'string') {

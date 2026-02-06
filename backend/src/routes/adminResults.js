@@ -11,8 +11,71 @@ const SessionAffectation = require('../models/affectation');
 const FinalDecision = require('../models/finalDecision');
 const Demande = require('../models/demande');
 const SignatoryMandate = require('../models/signatoryMandate');
+const User = require('../models/user');
 
 const router = express.Router();
+async function applySuccessLevelToUsers(sessionId) {
+  // 1) Récupérer toutes les formations de la session et construire map formationId -> niveau
+  const formations = await Formation.find({ session: oid(sessionId) })
+    .select('_id niveau')
+    .lean();
+
+  const levelByFormationId = new Map(
+    (formations || []).map(f => [String(f._id), String(f.niveau || '')])
+  );
+
+  // 2) Récupérer les trainees "success" (distinct trainee)
+  const winners = await FinalDecision.aggregate([
+    {
+      $match: {
+        session: oid(sessionId),
+        status: 'validated',
+        decision: 'success',
+      },
+    },
+    {
+      $group: {
+        _id: '$trainee',                 // traineeId
+        formation: { $first: '$formation' }, // 1 formation associée
+      },
+    },
+  ]);
+
+  if (!winners.length) return { matched: 0, modified: 0, skipped: 0 };
+
+  // 3) Bulk update users.niveau
+  const ops = [];
+  let skipped = 0;
+
+  for (const w of winners) {
+    const traineeId = w._id;
+    const formationId = String(w.formation || '');
+    const niveau = levelByFormationId.get(formationId);
+
+    if (!traineeId || !niveau) {
+      skipped++;
+      continue;
+    }
+
+    ops.push({
+      updateOne: {
+        filter: { _id: traineeId },
+        update: { $set: { niveau } }, // ✅ champ correct: "niveau"
+      },
+    });
+  }
+
+  if (!ops.length) return { matched: 0, modified: 0, skipped };
+
+  const r = await User.bulkWrite(ops, { ordered: false });
+
+  return {
+    matched: r.matchedCount || 0,
+    modified: r.modifiedCount || 0,
+    skipped,
+  };
+}
+
 
 function bad(req, res) {
   const e = validationResult(req);
@@ -490,12 +553,14 @@ router.post(
 
         // les deux validations sont présentes → visibilité
         session.isVisible = true;
+        const applied = await applySuccessLevelToUsers(sessionId);
 
         await session.save();
 
         return res.json({
           ok: true,
           step: 'commissioner_validated',
+          applied,
           session: {
             sessionId: String(session._id),
             validations: session.validations,

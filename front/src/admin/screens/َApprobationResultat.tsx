@@ -136,7 +136,6 @@ function flattenSessionToRows(session: SessionCard): FlatRow[] {
 }
 
 function validateButtonLabel(meRole: RoleMe): string {
-  // ✅ labels corrects
   if (meRole === 'cn_commissioner') return 'مصادقة القائد العام';
   if (meRole === 'cn_president') return 'مصادقة رئيس اللجنة الوطنية';
   return 'المصادقة على النتائج';
@@ -160,6 +159,14 @@ export default function AdminResultsValidation(): React.JSX.Element {
 
   const [savingBySession, setSavingBySession] = React.useState<Record<string, boolean>>({});
   const [saveErrBySession, setSaveErrBySession] = React.useState<Record<string, string | null>>({});
+
+  // ✅ NEW: download state
+  const [downloadingBySession, setDownloadingBySession] = React.useState<Record<string, boolean>>(
+    {}
+  );
+  const [downloadErrBySession, setDownloadErrBySession] = React.useState<
+    Record<string, string | null>
+  >({});
 
   const [signatureModalOpen, setSignatureModalOpen] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
@@ -286,6 +293,55 @@ export default function AdminResultsValidation(): React.JSX.Element {
     }
   }
 
+  // ✅ NEW: download ZIP by region (hidden when session.isVisible === true)
+  async function downloadZipByRegion(sessionId: string, sessionTitle?: string) {
+    try {
+      setDownloadingBySession(prev => ({ ...prev, [sessionId]: true }));
+      setDownloadErrBySession(prev => ({ ...prev, [sessionId]: null }));
+
+      const url = `${API_BASE}/final-decisions/sessions/${sessionId}/report-by-region.zip?ts=${Date.now()}`;
+
+      const token = localStorage.getItem('token') || '';
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: token ? ({ Authorization: `Bearer ${token}` } as any) : ({} as any),
+      });
+
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        throw new Error(txt || `HTTP ${r.status}`);
+      }
+
+      const blob = await r.blob();
+
+      const safe = (s: any) =>
+        String(s || 'session')
+          .normalize('NFKD')
+          .replace(/[^\w\-ء-ي]+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+          .slice(0, 80);
+
+      const filename = `results_by_region_${safe(sessionTitle)}.zip`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e: any) {
+      setDownloadErrBySession(prev => ({
+        ...prev,
+        [sessionId]: e?.message || 'تعذّر تحميل الملف',
+      }));
+    } finally {
+      setDownloadingBySession(prev => ({ ...prev, [sessionId]: false }));
+    }
+  }
+
   function goToDetails(formationId: string) {
     nav('/moderator/finalresults', { state: { formationId } });
   }
@@ -308,8 +364,12 @@ export default function AdminResultsValidation(): React.JSX.Element {
       <div style={{ display: 'grid', gap: 10 }}>
         {sessions.map(s => {
           const opened = openId === s.sessionId;
+
           const saving = !!savingBySession[s.sessionId];
           const saveErr = saveErrBySession[s.sessionId] || null;
+
+          const downloading = !!downloadingBySession[s.sessionId];
+          const downloadErr = downloadErrBySession[s.sessionId] || null;
 
           const canValidateRole = meRole === 'cn_president' || meRole === 'cn_commissioner';
 
@@ -326,6 +386,10 @@ export default function AdminResultsValidation(): React.JSX.Element {
           const validateLabel = validateButtonLabel(meRole);
 
           const rows = flattenSessionToRows(s);
+
+          // ✅ show ZIP button unless session.isVisible === true
+          const showZipBtn = s.isVisible;
+          const zipDisabled = downloading; // keep simple; add more conditions if you want
 
           return (
             <div key={s.sessionId} style={styles.card}>
@@ -370,8 +434,8 @@ export default function AdminResultsValidation(): React.JSX.Element {
 
               {opened && (
                 <div style={styles.detailWrap}>
-                  {/* bouton validation session */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 10 }}>
+                  {/* bouton validation session + bouton ZIP */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
                     {!hideValidateButtonForUX && (
                       <button
                         style={{
@@ -382,6 +446,7 @@ export default function AdminResultsValidation(): React.JSX.Element {
                           color: '#fff',
                           cursor: validateDisabled ? 'default' : 'pointer',
                           fontSize: 13,
+                          whiteSpace: 'nowrap',
                         }}
                         disabled={validateDisabled}
                         onClick={() => startValidationWithSignature(s.sessionId)}
@@ -396,6 +461,27 @@ export default function AdminResultsValidation(): React.JSX.Element {
                         }
                       >
                         {saving ? '… جارِ التنفيذ' : validateLabel}
+                      </button>
+                    )}
+
+                    {/* ✅ NEW ZIP button (hidden if isVisible=true) */}
+                    {showZipBtn && (
+                      <button
+                        style={{
+                          borderRadius: 999,
+                          border: `1px solid ${RED}`,
+                          padding: '8px 16px',
+                          background: zipDisabled ? '#f3f4f6' : 'transparent',
+                          color: zipDisabled ? '#9ca3af' : RED,
+                          cursor: zipDisabled ? 'default' : 'pointer',
+                          fontSize: 13,
+                          whiteSpace: 'nowrap',
+                        }}
+                        disabled={zipDisabled}
+                        onClick={() => downloadZipByRegion(s.sessionId, s.title)}
+                        title="تحميل تقرير حسب الجهة (ZIP)"
+                      >
+                        {downloading ? '… جارِ التحميل' : 'تحميل ZIP حسب الجهة'}
                       </button>
                     )}
 
@@ -414,6 +500,7 @@ export default function AdminResultsValidation(): React.JSX.Element {
                   </div>
 
                   {saveErr && <div style={{ color: '#b91c1c', fontSize: 12 }}>❌ {saveErr}</div>}
+                  {downloadErr && <div style={{ color: '#b91c1c', fontSize: 12 }}>❌ {downloadErr}</div>}
 
                   {/* tableau unique */}
                   <div style={{ overflowX: 'auto' }}>
@@ -637,7 +724,7 @@ function EyeIcon() {
 function EyeOffIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24">
-    <path d="M1 1l22 22" stroke="currentColor" strokeWidth="2" />
+      <path d="M1 1l22 22" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
 }

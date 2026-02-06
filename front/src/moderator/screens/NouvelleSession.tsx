@@ -68,7 +68,9 @@ export default function NouvelleSession(): React.JSX.Element {
           };
         });
 
-        setRows(mapped);
+        const allowed = new Set(['تمهيدية', 'شارة خشبية']);
+        const filtered = mapped.filter(r => r.trainingLevels.some(lvl => allowed.has(lvl)));
+        setRows(filtered);
       } catch (e: any) {
         setErr(e.message || 'تعذر الجلب');
       } finally {

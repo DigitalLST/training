@@ -37,7 +37,7 @@ export default function LandingMain(): React.JSX.Element {
   <Card onClick={()=>nav('/admin')} img="/national_committee.png" title="فضاء اللجنة الوطنية" />
   )}
    {canAccessModeratorRegional(user) && (
-    <Card onClick={()=>nav('/moderatorregion')} img="/national_committee.png" title="فضاء اللجنة الجهوية" />
+    <Card onClick={()=>nav('/region')} img="/national_committee.png" title="فضاء اللجنة الجهوية" />
 )}
         <Card onClick={()=>nav('/contact_us')}  img="/contact_us.png"  title="إتصل بنا" />
         <Card onClick={()=>nav('/profile')}  img="/account.png"  title="تغيير معطيات الحساب" />

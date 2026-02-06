@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      font-family: "Amiri", serif;
+      direction: rtl;
+      text-align: right;
+      margin: 20px;
+
+      /* ✅ IMPORTANT pour laisser la place au footer fixed */
+      padding-bottom: 45mm;
+    }
+
+    /* ✅ Footer signatures CN (miniatures) */
+    .cn-footer {
+      position: fixed;
+      bottom: 8mm;
+      left: 12mm;           /* ✅ bas-gauche */
+      z-index: 9999;
+      display: flex;
+      gap: 8mm;
+      align-items: flex-end;
+
+      /* en RTL, certains navigateurs inversent; on force LTR pour stable */
+      direction: ltr;
+    }
+
+    .cn-footer .sig {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    /* ✅ miniature 1/2 à 1/4 : ajuste ici */
+    .cn-footer img {
+      width: 45px;
+      height: auto;
+      opacity: 0.95;
+    }
+
+    .header-logo {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .header-logo img {
+      width: 120px;
+    }
+
+    .title {
+      text-align: center;
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+      margin-bottom: 2px;
+    }
+
+    .sub_subtitle {
+      text-align: center;
+      font-size: 18px;
+      margin-bottom: 2px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+
+    /* ---------- TABLES GÉNÉRALES (avec header répété) ---------- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 12px;
+      page-break-inside: auto;
+    }
+
+    thead {
+      display: table-header-group; /* ✅ répète l’en-tête sur chaque page */
+    }
+
+    tr {
+      page-break-inside: avoid;    /* ✅ une ligne ne se coupe pas en deux */
+      page-break-after: auto;
+    }
+
+    th, td {
+      border: 1px solid #999;
+      padding: 4px 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    th {
+      background-color: #f1f1f1;
+      font-weight: bold;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    .muted {
+      text-align: center;
+      margin-top: 16px;
+      color: #666;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <% 
+    const labelDecision = (decision) => {
+      if (decision === 'success') return 'يؤهل';
+      if (decision === 'retake') return 'يعيد الدورة';
+      if (decision === 'incompatible') return 'لا يناسب الدور';
+      return '—';
+    };
+
+    const toArDate = (d) => {
+      if (!d) return '';
+      const dd = new Date(d);
+      if (Number.isNaN(dd.getTime())) return '';
+      return dd.toLocaleDateString('ar-TN', { year:'numeric', month:'2-digit', day:'2-digit' });
+    };
+
+    const PERIOD = (() => {
+      const s = session && session.startDate ? toArDate(session.startDate) : '';
+      const e = session && session.endDate ? toArDate(session.endDate) : '';
+      if (!s && !e) return '';
+      return `من ${s} إلى ${e}`;
+    })();
+
+    const LEVELS = ['تمهيدية', 'شارة خشبية'];
+  %>
+
+  <!-- ✅ FOOTER mini signatures (président + commissaire) -->
+  <% if ((cnPresident && cnPresident.signatureDataUrl) || (cnCommissioner && cnCommissioner.signatureDataUrl)) { %>
+    <div class="cn-footer">
+      <% if (cnCommissioner && cnCommissioner.signatureDataUrl) { %>
+        <div class="sig">
+          <img src="<%= cnCommissioner.signatureDataUrl %>" alt="commissioner-signature" />
+        </div>
+      <% } %>
+
+      <% if (cnPresident && cnPresident.signatureDataUrl) { %>
+        <div class="sig">
+          <img src="<%= cnPresident.signatureDataUrl %>" alt="president-signature" />
+        </div>
+      <% } %>
+    </div>
+  <% } %>
+
+  <% (pages || []).forEach(function(p, pageIdx) { %>
+
+    <% if (pageIdx > 0) { %>
+      <div class="page-break"></div>
+    <% } %>
+
+    <!-- EN-TÊTE AVEC LOGO -->
+    <div class="header-logo">
+      <% if (logoDataUrl) { %>
+        <img src="<%= logoDataUrl %>" />
+      <% } %>
+    </div>
+
+    <div class="title"><%= sessionTitle || (session && session.title) || 'الدورة' %></div>
+
+    <% if (session && session.organizer) { %>
+      <div class="sub_subtitle"><%= session.organizer %></div>
+    <% } %>
+
+    <% if (PERIOD) { %>
+      <div class="sub_subtitle"><%= PERIOD %></div>
+    <% } %>
+
+    <div class="subtitle">الجهة : <%= exportRegion || '—' %></div>
+
+    <!-- ✅ احصائيات عامة (2 lignes / levels) -->
+    <div class="section-title">إحصائيات عامة</div>
+    <table>
+      <thead>
+        <tr>
+          <th>المستوى</th>
+          <th>عدد المسجلين</th>
+          <th>يؤهل</th>
+          <th>لا يؤهل</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% 
+          // On force toujours 2 lignes (تمهيدية / شارة خشبية) même si statsByLevel vide
+          const sbl = Array.isArray(statsByLevel) ? statsByLevel : [];
+          const mapStats = new Map(sbl.map(x => [String(x.trainingLevel), x]));
+        %>
+
+        <% LEVELS.forEach(function(lvl) { 
+             const st = mapStats.get(lvl) || { total: 0, success: 0, nonsuccess: 0 };
+        %>
+          <tr>
+            <td><%= lvl %></td>
+            <td><%= st.total || 0 %></td>
+            <td><%= st.success || 0 %></td>
+            <td><%= st.nonsuccess || 0 %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+
+    <!-- Titre de section -->
+    <div class="section-title"><%= p.title || 'النتائج' %></div>
+
+    <%
+      const list = Array.isArray(p.trainees) ? p.trainees : [];
+      const PER_PAGE = 30;
+
+      const chunks = [];
+      for (let i = 0; i < list.length; i += PER_PAGE) {
+        chunks.push(list.slice(i, i + PER_PAGE));
+      }
+    %>
+
+    <% if (!chunks.length) { %>
+      <div class="muted">لا توجد بيانات</div>
+    <% } %>
+
+    <% chunks.forEach(function(chunk, chunkIdx) { %>
+
+      <% if (chunkIdx > 0) { %>
+        <div class="page-break"></div>
+
+        <div class="header-logo">
+          <% if (logoDataUrl) { %>
+            <img src="<%= logoDataUrl %>" />
+          <% } %>
+        </div>
+
+        <div class="title"><%= sessionTitle || (session && session.title) || 'الدورة' %></div>
+        <div class="subtitle">الجهة : <%= exportRegion || '—' %></div>
+        <div class="sub_subtitle"><%= (p.title || 'النتائج') %> (تابع)</div>
+      <% } %>
+
+      <table>
+        <thead>
+          <tr>
+            <th>المعرف الكشفي</th>
+            <th>الاسم واللقب</th>
+            <th>الشعبة</th>
+            <th>اسم التكوين</th>
+            <th>القرار النهائي</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% chunk.forEach(function(t) { %>
+            <tr>
+              <td><%= t.idScout || '—' %></td>
+              <td><%= (t.prenom || '') + ' ' + (t.nom || '') %></td>
+              <td><%= t.branche || '—' %></td>
+              <td><%= t.formationTitle || '—' %></td>
+              <td><%= labelDecision(t.decision) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+
+    <% }) %>
+
+  <% }) %>
+
+</body>
+</html>

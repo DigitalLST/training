@@ -333,5 +333,86 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     await browser.close();
   }
 }
+async function generatePdfFromTemplate(rawData, templateFile) {
+  const templatePath = path.join(__dirname, '..', 'views', templateFile);
 
-module.exports = { generateFinalResultsPdf };
+  const data = JSON.parse(JSON.stringify(rawData || {}));
+
+  // ---- Reprend l’enrichissement “commun” (copie de ce que tu fais déjà) ----
+  const session = data.session || {};
+  const formation = data.formation || {};
+  const director = data.director || null;
+
+  data.sessionTitle = session.title || 'الدورة';
+  data.formationTitle = formation.nom || '';
+  data.centreLine = `${formation.centreTitle || ''}${
+    formation.centreRegion ? ' - ' + formation.centreRegion : ''
+  }`;
+
+  if (session.startDate || session.endDate) {
+    const startStr = session.startDate ? new Date(session.startDate).toLocaleDateString('ar-TN') : '';
+    const endStr = session.endDate ? new Date(session.endDate).toLocaleDateString('ar-TN') : '';
+    data.periodLine = `من ${startStr} إلى ${endStr}`;
+  } else {
+    data.periodLine = '';
+  }
+
+  data.directorName = director ? `${director.prenom || ''} ${director.nom || ''}`.trim() : '';
+
+  // logo
+  let logoDataUrl = null;
+  try {
+    const logoAbs = path.join(__dirname, '..', 'public', 'fonts', 'logo.png');
+    const logoBuf = fs.readFileSync(logoAbs);
+    logoDataUrl = 'data:image/png;base64,' + logoBuf.toString('base64');
+  } catch (err) {}
+  data.logoDataUrl = logoDataUrl;
+
+  // team roleLabel + signatures
+  (data.team || []).forEach(m => {
+    if (m.role === 'director') m.roleLabel = 'قائد الدراسة';
+    else if (m.role === 'trainer') m.roleLabel = 'مساعد قائد الدراسة';
+    else if (m.role === 'assistant') m.roleLabel = 'مساعد قائد الدراسة';
+    else if (m.role === 'coach') m.roleLabel = 'المرشد الفني';
+    else m.roleLabel = m.role || '';
+
+    if (m.lastApprovedAt) {
+      const d = new Date(m.lastApprovedAt);
+      m.lastApprovedAtText = d.toLocaleDateString('ar-TN', { year:'numeric', month:'2-digit', day:'2-digit' });
+    } else {
+      m.lastApprovedAtText = '';
+    }
+
+    m.signatureDataUrl = m.signatureUrl ? readSignatureDataUrl(m.signatureUrl) : null;
+  });
+
+  // CN signatures (comme chez toi)
+  if (data.cnPresident) {
+    data.cnPresident.validatedAtText = toDateStrAr(data.cnPresident.validatedAt);
+    data.cnPresident.signatureDataUrl = readSignatureDataUrl(data.cnPresident.signatureUrl);
+  }
+  if (data.cnCommissioner) {
+    data.cnCommissioner.validatedAtText = toDateStrAr(data.cnCommissioner.validatedAt);
+    data.cnCommissioner.signatureDataUrl = readSignatureDataUrl(data.cnCommissioner.signatureUrl);
+  }
+
+  // ---- Render / PDF ----
+  const html = await ejs.renderFile(templatePath, data, { async: true });
+
+  const browser = await launchBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return pdfBuffer;
+  } finally {
+    await browser.close();
+  }
+}
+
+module.exports = { generateFinalResultsPdf, generatePdfFromTemplate };
