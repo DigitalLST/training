@@ -992,22 +992,28 @@ router.get(
         if (!byRegion.has(region)) byRegion.set(region, []);
         byRegion.get(region).push(t);
       }
+      function pad2(n) {
+  const x = Number(n) || 0;
+  return x < 10 ? `0${x}` : String(x);
+}
 
-      const safe = s =>
-        String(s || '')
-          .normalize('NFKD')
-          .replace(/[^\w\-ء-ي]+/g, '_')
-          .replace(/_+/g, '_')
-          .replace(/^_|_$/g, '')
-          .slice(0, 80);
+function leadershipMonthFromStartDate(startDate) {
+  const d = startDate ? new Date(startDate) : null;
+  if (!d || Number.isNaN(d.getTime())) return 'leadership_unknown';
+  const y = d.getFullYear();
+  const m = pad2(d.getMonth() + 1); // 0-indexed
+  return `leadership_${y}_${m}`;
+}
 
-      const zipName = `results_by_region_${safe(baseData.session?.title || 'session')}.zip`;
+const baseName = leadershipMonthFromStartDate(baseData.session?.startDate);
+const zipName = `${baseName}.zip`;
 
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${zipName}"; filename*=UTF-8''${encodeURIComponent(zipName)}`
-      );
+res.setHeader('Content-Type', 'application/zip');
+res.setHeader(
+  'Content-Disposition',
+  `attachment; filename="${zipName}"; filename*=UTF-8''${encodeURIComponent(zipName)}`
+);
+
 
       const archive = archiver('zip', { zlib: { level: 9 } });
       archive.on('error', err => {
