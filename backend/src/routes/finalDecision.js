@@ -992,27 +992,34 @@ router.get(
         if (!byRegion.has(region)) byRegion.set(region, []);
         byRegion.get(region).push(t);
       }
+      // helpers (à mettre au début du handler, avant l'utilisation)
       function pad2(n) {
-  const x = Number(n) || 0;
-  return x < 10 ? `0${x}` : String(x);
-}
-
-function leadershipMonthFromStartDate(startDate) {
-  const d = startDate ? new Date(startDate) : null;
-  if (!d || Number.isNaN(d.getTime())) return 'leadership_unknown';
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1); // 0-indexed
-  return `leadership_${y}_${m}`;
-}
-
-const baseName = leadershipMonthFromStartDate(baseData.session?.startDate);
-const zipName = `${baseName}.zip`;
-
-res.setHeader('Content-Type', 'application/zip');
-res.setHeader(
-  'Content-Disposition',
-  `attachment; filename="${zipName}"; filename*=UTF-8''${encodeURIComponent(zipName)}`
-);
+        const x = Number(n) || 0;
+        return x < 10 ? `0${x}` : String(x)
+      }
+      function leadershipMonthFromStartDate(startDate) {
+        const d = startDate ? new Date(startDate) : null;
+        if (!d || Number.isNaN(d.getTime())) return 'leadership_unknown';
+        const y = d.getFullYear();
+        const m = pad2(d.getMonth() + 1);
+        return `leadership_${y}_${m}`;
+      }
+      // ✅ safe pour noms de fichiers à l’intérieur du ZIP (pdf par région)
+      const safe = (s) =>
+        String(s || '')
+      .normalize('NFKD')
+      .replace(/[\r\n"]/g, '')          // sécurité
+      .replace(/[^\w\-ء-ي]+/g, '_')     // garde AR + word chars
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 80);
+      const baseName = leadershipMonthFromStartDate(baseData.session?.startDate);
+      const zipName = `${baseName}.zip`;
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${zipName}"; filename*=UTF-8''${encodeURIComponent(zipName)}`
+      );
 
 
       const archive = archiver('zip', { zlib: { level: 9 } });
