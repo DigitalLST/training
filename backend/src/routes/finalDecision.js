@@ -14,8 +14,7 @@ const Demande = require('../models/demande');
 const archiver = require('archiver');
 const {
   generatePdfFromTemplate,
-  generateFinalResultsPdf,
-  generateRegionResultsPdf,
+  generateFinalResultsPdf
 } = require('../services/pdf');
 
 const router = express.Router();
@@ -1328,23 +1327,22 @@ router.get(
 
     try {
       const { formationId } = req.params;
-
       const data = await buildRegionReportData(formationId);
 
       const safe = s =>
         String(s || '')
           .normalize('NFKD')
-          .replace(/[^\w.-ء-ي]+/g, '_')
+          .replace(/[^\w.-]+/g, '_')
           .replace(/_+/g, '_')
           .replace(/^_|_$/g, '')
           .slice(0, 80);
 
       const sessionPart = safe(data.session?.title || 'session');
       const formationPart = safe(data.formation?.nom || 'formation');
-
       const filename = `report_region_${sessionPart}_${formationPart}.pdf`;
 
-      const pdfBuffer = await generateRegionResultsPdf(data);
+      // ✅ même logique que le PDF qui marche
+      const pdfBuffer = await generatePdfFromTemplate(data, 'report_region.ejs');
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
@@ -1355,8 +1353,7 @@ router.get(
       return res.end(pdfBuffer);
     } catch (err) {
       console.error('GET /final-decisions/formations/:formationId/report-region ERROR', err);
-      const status = err.statusCode || 500;
-      return res.status(status).json({
+      return res.status(500).json({
         message: err.message || 'Erreur serveur lors de la génération du PDF régional.',
       });
     }
