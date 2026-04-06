@@ -4,6 +4,7 @@ import { api } from '../../api/api';
 
 const RED = '#e20514';
 const STORE_KEY = 'aff_ctx_v2';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 
 type Ctx = {
   fid?: string | null;
@@ -103,6 +104,18 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   const [downloading, setDownloading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
+  const headers = React.useMemo(() => {
+    const h: Record<string, string> = {};
+    const t =
+      localStorage.getItem('token') ||
+      sessionStorage.getItem('token') ||
+      localStorage.getItem('access_token') ||
+      sessionStorage.getItem('access_token');
+
+    if (t) h.Authorization = `Bearer ${t}`;
+    return h;
+  }, []);
+
   React.useEffect(() => {
     const stored = readCtxFromStorage();
     setCtx(stored);
@@ -112,59 +125,51 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   }, [nav]);
 
   const fid = ctx?.fid || null;
+
   const downloadPdf = async () => {
-  if (!fid) return;
+    if (!fid) return;
 
-  try {
-    setDownloading(true);
-    setErr(null);
+    try {
+      setDownloading(true);
+      setErr(null);
 
-    const token =
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('token') ||
-      localStorage.getItem('access_token') ||
-      sessionStorage.getItem('access_token');
+      const requestUrl = `${API_BASE}/final-decisions/formations/${fid}/report-region`;
+      console.log('REQUEST URL =', requestUrl);
 
-    const res = await fetch(`/final-decisions/formations/${fid}/report-region`, {
-      method: 'GET',
-      headers: token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {},
-    });
-   
+      const res = await fetch(requestUrl, {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+      });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || 'Erreur lors du téléchargement du PDF');
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Erreur lors du téléchargement du PDF');
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/pdf')) {
+        const text = await res.text();
+        throw new Error(text || 'La réponse reçue n’est pas un PDF valide');
+      }
+
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = 'rapport_region.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e: any) {
+      setErr(e?.message || 'تعذّر تحميل بطاقة النتائج');
+    } finally {
+      setDownloading(false);
     }
-
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/pdf')) {
-      const text = await res.text();
-      throw new Error(text || 'La réponse reçue n’est pas un PDF valide');
-    }
-
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    console.log('DOWNLOAD URL =', url);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'rapport_region.pdf';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    window.URL.revokeObjectURL(url);
-  } catch (e: any) {
-    setErr(e?.message || 'تعذّر تحميل بطاقة النتائج');
-  } finally {
-    setDownloading(false);
-  }
-};
-
+  };
 
   React.useEffect(() => {
     (async () => {
