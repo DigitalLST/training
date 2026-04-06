@@ -125,7 +125,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
       localStorage.getItem('access_token') ||
       sessionStorage.getItem('access_token');
 
-    const res = await fetch(`/api/final-decisions/formations/${fid}/report-region`, {
+    const res = await fetch(`/final-decisions/formations/${fid}/report-region`, {
       method: 'GET',
       headers: token
         ? {
