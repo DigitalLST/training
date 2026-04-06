@@ -35,16 +35,6 @@ export default function DemandeSession(): React.JSX.Element {
     if (t) h.Authorization = `Bearer ${t}`;
     return h;
   }, []);
-  function toggleLevel(level: string) {
-  // ❌ empêcher modification de تمهيدية
-  if (level === 'تمهيدية') return;
-
-  setTrainingLevels((prev) =>
-    prev.includes(level)
-      ? prev.filter((l) => l !== level)
-      : [...prev, level]
-  );
-}
 
  
 
