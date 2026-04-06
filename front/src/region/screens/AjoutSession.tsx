@@ -21,8 +21,8 @@ export default function DemandeSession(): React.JSX.Element {
   const [endDate, setEndDate] = useState('');
 
   // ✅ وطنية: ممكن تختار الاثنين
-  const [trainingLevels, setTrainingLevels] = useState<string[]>([]); // ["تمهيدية","شارة خشبية"]
-  const [branches, setBranches] = useState<string[]>([]);
+  const [trainingLevels, setTrainingLevels] = useState<string[]>(['تمهيدية']);
+  const [branche, setBranches] = useState<string[]>([]);
 
   // ✅ جهوية: اختيار واحد
   const [regionalLevel, setRegionalLevel] = useState(''); // S1/S2/S3/الدراسة الابتدائية
@@ -35,10 +35,18 @@ export default function DemandeSession(): React.JSX.Element {
     if (t) h.Authorization = `Bearer ${t}`;
     return h;
   }, []);
-
   function toggleLevel(level: string) {
-    setTrainingLevels((prev) => (prev.includes(level) ? prev.filter((l) => l !== level) : [...prev, level]));
-  }
+  // ❌ empêcher modification de تمهيدية
+  if (level === 'تمهيدية') return;
+
+  setTrainingLevels((prev) =>
+    prev.includes(level)
+      ? prev.filter((l) => l !== level)
+      : [...prev, level]
+  );
+}
+
+ 
 
   function toggleBranch(branch: string) {
     setBranches((prev) => (prev.includes(branch) ? prev.filter((b) => b !== branch) : [...prev, branch]));
@@ -78,12 +86,12 @@ export default function DemandeSession(): React.JSX.Element {
       if (sessionType === 'NATIONAL') {
         // لازم يختار تمهيدية و/أو شارة خشبية
         if (trainingLevels.length === 0) return setErr('اختر المستوى التدريبي (تمهيدية و/أو شارة خشبية)');
-        if (branches.length === 0) return setErr('اختر القسم الفني');
+        if (branche.length === 0) return setErr('اختر القسم الفني');
 
         payload = {
           ...payload,
           training_levels: trainingLevels, // ✅ 1 request, 1 row in DB
-          branches
+          branche
         };
 
         const res = await fetch(`${API_BASE}/region-session-requests`, {
@@ -221,17 +229,8 @@ export default function DemandeSession(): React.JSX.Element {
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input
                     type="checkbox"
-                    checked={trainingLevels.includes('شارة خشبية')}
-                    onChange={() => toggleLevel('شارة خشبية')}
-                  />
-                  <span>شارة خشبية</span>
-                </label>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={trainingLevels.includes('تمهيدية')}
-                    onChange={() => toggleLevel('تمهيدية')}
+                    checked={true}
+                    disabled
                   />
                   <span>تمهيدية</span>
                 </label>
@@ -245,7 +244,7 @@ export default function DemandeSession(): React.JSX.Element {
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
                 {['جوالة', 'دليلات', 'كشافة', 'مرشدات', 'أشبال', 'زهرات', 'عصافير', 'رواد'].map((b) => (
                   <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input type="checkbox" checked={branches.includes(b)} onChange={() => toggleBranch(b)} />
+                    <input type="checkbox" checked={branche.includes(b)} onChange={() => toggleBranch(b)} />
                     <span>{b}</span>
                   </label>
                 ))}

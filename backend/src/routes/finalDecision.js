@@ -12,9 +12,11 @@ const FormationReport = require('../models/formationReport');
 const Session = require('../models/session');
 const Demande = require('../models/demande'); 
 const archiver = require('archiver');
-const { generatePdfFromTemplate } = require('../services/pdf');
-
-const { generateFinalResultsPdf } = require('../services/pdf');
+const {
+  generatePdfFromTemplate,
+  generateFinalResultsPdf,
+  generateRegionResultsPdf,
+} = require('../services/pdf');
 
 const router = express.Router();
 
@@ -468,6 +470,58 @@ async function buildSessionResultsReportData(sessionId) {
     trainees,
     cnPresident,
     cnCommissioner,
+  };
+}
+async function buildRegionReportData(formationId) {
+  const formation = await Formation.findById(formationId)
+    .populate({ path: 'centre', select: 'title region' })
+    .populate({ path: 'session', select: 'title startDate endDate' })
+    .lean();
+
+  if (!formation) {
+    const err = new Error('Formation introuvable');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const affects = await SessionAffectation.find({ formation: formationId })
+    .populate({ path: 'user', select: 'prenom nom email idScout region' })
+    .lean();
+
+  const team = affects
+    .filter(a => ['director_reg', 'trainer_reg', 'assistant_reg', 'coach_reg'].includes(a.role))
+    .map(a => ({
+      prenom: a.user?.prenom || '',
+      nom: a.user?.nom || '',
+      role: a.role,
+    }));
+
+  const trainees = affects
+    .filter(a => a.role === 'trainee' && a.isPresent === true)
+    .map(a => ({
+      idScout: a.user?.idScout || '',
+      prenom: a.user?.prenom || '',
+      nom: a.user?.nom || '',
+      region: a.user?.region || '',
+      email: a.user?.email || '',
+    }));
+
+  return {
+    formation: {
+      id: String(formation._id),
+      nom: formation.nom || '',
+      centreTitle: formation.centre?.title || '',
+      centreRegion: formation.centre?.region || '',
+    },
+    session: formation.session
+      ? {
+          title: formation.session.title || '',
+          startDate: formation.session.startDate || null,
+          endDate: formation.session.endDate || null,
+        }
+      : null,
+    team,
+    trainees,
   };
 }
 
@@ -1111,6 +1165,202 @@ router.get(
     }
   }
 );
+/* ----------------- POST /formations/:formationId/validate-region ----------------- */
+/**
+ * Body:
+ * {
+ *   items: [
+ *     { traineeId: "...", participated: true },
+ *     { traineeId: "...", participated: false }
+ *   ]
+ * }
+ *
+ * Règle:
+ * - si participated=true => upsert FinalDecision
+ *   decision=success, status=validated, totalNote=10, totalMax=10, comment=''
+ * - si participated=false => suppression éventuelle de la finalDecision existante
+ * - blocage si aujourd'hui > endDate + 7 jours
+ */
+router.post(
+  '/formations/:formationId/validate-region',
+  requireAuth,
+  [
+    param('formationId').isMongoId(),
+    body('items').isArray(),
+    body('items.*.traineeId').isMongoId(),
+    body('items.*.participated').isBoolean(),
+  ],
+  async (req, res) => {
+    const e = bad(req, res);
+    if (e) return;
 
+    const { formationId } = req.params;
+    const { items } = req.body || {};
+    const meId = (req.user && (req.user.id || req.user._id)) || null;
+
+    try {
+      const formation = await Formation.findById(formationId)
+        .select('_id session')
+        .populate({ path: 'session', select: 'endDate' })
+        .lean();
+
+      if (!formation) {
+        return res.status(404).json({ message: 'Formation introuvable' });
+      }
+
+      // ✅ moderator only
+      if (!req.user || !(req.user.isModerator || req.user.role === 'moderator')) {
+        return res.status(403).json({
+          message: 'غير مسموح لك بالمصادقة على هذه الدورة',
+        });
+      }
+
+      // ✅ verrou J+7 basé sur la fin de session
+      const endDate = formation.session?.endDate ? new Date(formation.session.endDate) : null;
+      if (endDate && !Number.isNaN(endDate.getTime())) {
+        const lockDate = new Date(endDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+        if (new Date() > lockDate) {
+          return res.status(400).json({
+            message: 'انتهت مهلة التعديل بعد 7 أيام من تاريخ نهاية الدورة',
+          });
+        }
+      }
+
+      const traineeIds = items.map(it => String(it.traineeId));
+
+      const traineeAffects = await SessionAffectation.find({
+        formation: formationId,
+        role: 'trainee',
+        user: { $in: traineeIds },
+      })
+        .select('_id user formation isPresent')
+        .lean();
+
+      const affectByUserId = new Map(
+        traineeAffects.map(a => [String(a.user), a])
+      );
+
+      const affectationOps = [];
+      const finalDecisionUpserts = [];
+      const deleteTraineeIds = [];
+
+      for (const it of items) {
+        const traineeId = String(it.traineeId);
+        const aff = affectByUserId.get(traineeId);
+        if (!aff) continue;
+
+        // checkbox -> affectation.isPresent
+        affectationOps.push({
+          updateOne: {
+            filter: { _id: aff._id },
+            update: {
+              $set: { isPresent: !!it.participated },
+            },
+          },
+        });
+
+        if (it.participated === true) {
+          finalDecisionUpserts.push({
+            updateOne: {
+              filter: {
+                session: formation.session?._id || formation.session,
+                formation: formationId,
+                trainee: traineeId,
+              },
+              update: {
+                $set: {
+                  affectation: aff._id,
+                  decision: 'success',
+                  status: 'validated',
+                  totalNote: 10,
+                  totalMax: 10,
+                  comment: '',
+                  validatedBy: meId || null,
+                  validatedAt: new Date(),
+                  approvals: [],
+                },
+              },
+              upsert: true,
+            },
+          });
+        } else {
+          deleteTraineeIds.push(traineeId);
+        }
+      }
+
+      if (affectationOps.length > 0) {
+        await SessionAffectation.bulkWrite(affectationOps);
+      }
+
+      if (finalDecisionUpserts.length > 0) {
+        await FinalDecision.bulkWrite(finalDecisionUpserts);
+      }
+
+      if (deleteTraineeIds.length > 0) {
+        await FinalDecision.deleteMany({
+          session: formation.session?._id || formation.session,
+          formation: formationId,
+          trainee: { $in: deleteTraineeIds },
+        });
+      }
+
+      return res.json({
+        success: true,
+        updatedPresence: affectationOps.length,
+        upserted: finalDecisionUpserts.length,
+        deleted: deleteTraineeIds.length,
+      });
+    } catch (err) {
+      console.error('POST /final-decisions/formations/:formationId/validate-region ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur' });
+    }
+  }
+);
+
+
+router.get(
+  '/formations/:formationId/report-region',
+  requireAuth,
+  [param('formationId').isMongoId()],
+  async (req, res) => {
+    const e = bad(req, res);
+    if (e) return;
+
+    try {
+      const { formationId } = req.params;
+
+      const data = await buildRegionReportData(formationId);
+
+      const safe = s =>
+        String(s || '')
+          .normalize('NFKD')
+          .replace(/[^\w.-ء-ي]+/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+          .slice(0, 80);
+
+      const sessionPart = safe(data.session?.title || 'session');
+      const formationPart = safe(data.formation?.nom || 'formation');
+
+      const filename = `report_region_${sessionPart}_${formationPart}.pdf`;
+
+      const pdfBuffer = await generateRegionResultsPdf(data);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+      );
+
+      return res.end(pdfBuffer);
+    } catch (err) {
+      console.error('GET /final-decisions/formations/:formationId/report-region ERROR', err);
+      const status = err.statusCode || 500;
+      return res.status(status).json({
+        message: err.message || 'Erreur serveur lors de la génération du PDF régional.',
+      });
+    }
+  }
+);
 
 module.exports = router;

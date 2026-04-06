@@ -4,7 +4,6 @@ const { Schema } = mongoose;
 
 const TRAINING_LEVELS = [
   "تمهيدية",
-  "شارة خشبية",
   "S1",
   "S2",
   "S3",

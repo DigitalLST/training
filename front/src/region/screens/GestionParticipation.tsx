@@ -70,7 +70,7 @@ export default function GestionParticipation(): React.JSX.Element {
 
         const data = await fetchSessionsPreferRegional();
 
-        const mapped: SessionRow[] = data.map((s) => {
+        const mapped: SessionRow[] = data.filter((s) => s.isVisible === false).map((s) => {
           const trainingLevels =
             normArray(s.trainingLevels ?? s.trainingLevel ?? s.levels ?? s.level);
           const branches =

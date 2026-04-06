@@ -15,7 +15,7 @@ const norm = (s) =>
     .replace(/\u200f|\u200e/g, "")
     .trim();
 
-const NATIONAL_LEVELS = new Set(["تمهيدية", "شارة خشبية"]);
+const NATIONAL_LEVELS = new Set(["تمهيدية"]);
 const REGIONAL_LEVELS = new Set(["S1", "S2", "S3", "الدراسة الابتدائية"]);
 const ALLOWED_LEVELS = new Set([...NATIONAL_LEVELS, ...REGIONAL_LEVELS]);
 
@@ -49,46 +49,64 @@ router.post("/", requireAuth, async (req, res) => {
     const userId = req.user?.id;
     const regionFromUser = norm(req.user?.region);
 
-    if (!userId) return res.status(401).json({ error: "Non authentifié" });
-    if (!regionFromUser) return res.status(400).json({ error: "User has no region set" });
+    if (!userId) {
+      return res.status(401).json({ error: "Non authentifié" });
+    }
 
     const {
       name,
       training_levels,
       startDate,
       endDate,
-      // national:
       branche,
-      // regional:
       director_name,
       participants_count,
     } = req.body || {};
 
     const nm = norm(name);
-    if (!nm) return res.status(400).json({ error: "name is required" });
-
-    const levels = Array.isArray(training_levels) ? training_levels.map(norm).filter(Boolean) : [];
-    if (levels.length === 0) return res.status(400).json({ error: "training_levels is required" });
-
-    for (const l of levels) {
-      if (!ALLOWED_LEVELS.has(l)) return res.status(400).json({ error: `Invalid level: ${l}` });
+    if (!nm) {
+      return res.status(400).json({ error: "name is required" });
     }
 
-    if (!startDate || !endDate) return res.status(400).json({ error: "startDate and endDate are required" });
+    const levels = Array.isArray(training_levels)
+      ? training_levels.map(norm).filter(Boolean)
+      : [];
+
+    if (levels.length === 0) {
+      return res.status(400).json({ error: "training_levels is required" });
+    }
+
+    for (const l of levels) {
+      if (!ALLOWED_LEVELS.has(l)) {
+        return res.status(400).json({ error: `Invalid level: ${l}` });
+      }
+    }
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: "startDate and endDate are required" });
+    }
+
     const sd = new Date(startDate);
     const ed = new Date(endDate);
-    if (!isValidDate(sd) || !isValidDate(ed)) return res.status(400).json({ error: "Invalid dates" });
-    if (ed < sd) return res.status(400).json({ error: "endDate must be >= startDate" });
+
+    if (!isValidDate(sd) || !isValidDate(ed)) {
+      return res.status(400).json({ error: "Invalid dates" });
+    }
+
+    if (ed < sd) {
+      return res.status(400).json({ error: "endDate must be >= startDate" });
+    }
 
     const hasNational = levels.some((l) => NATIONAL_LEVELS.has(l));
     const hasRegional = levels.some((l) => REGIONAL_LEVELS.has(l));
 
     if (hasNational && hasRegional) {
-      return res.status(400).json({ error: "Cannot mix national and regional levels in the same request" });
+      return res.status(400).json({
+        error: "Cannot mix national and regional levels in the same request",
+      });
     }
 
     let payload = {
-      region: regionFromUser,
       training_levels: levels,
       startDate: sd,
       endDate: ed,
@@ -98,29 +116,56 @@ router.post("/", requireAuth, async (req, res) => {
       generated_session_id: null,
     };
 
+    // ===== NATIONAL =====
     if (hasNational) {
-      // NATIONAL: require branche[]
-      const b = Array.isArray(branche) ? branche.map(norm).filter(Boolean) : [];
-      if (b.length === 0) return res.status(400).json({ error: "branche is required for national requests" });
+      const branches = Array.isArray(branche)
+        ? branche.map(norm).filter(Boolean)
+        : [];
+
+      if (branches.length === 0) {
+        return res.status(400).json({
+          error: "branche is required for national requests",
+        });
+      }
 
       payload = {
         ...payload,
-        branche: b,
+        region: regionFromUser || "NATIONAL",
+        branche: branches,
         director_name: null,
         participants_count: null,
       };
-    } else {
-      // REGIONAL: exactly one level + director + participants
-      if (levels.length !== 1) return res.status(400).json({ error: "Regional request must have exactly one level" });
+    }
+
+    // ===== REGIONAL =====
+    else {
+      if (!regionFromUser) {
+        return res.status(400).json({ error: "User has no region set" });
+      }
+
+      if (levels.length !== 1) {
+        return res.status(400).json({
+          error: "Regional request must have exactly one level",
+        });
+      }
 
       const director = norm(director_name);
-      if (!director) return res.status(400).json({ error: "director_name is required for regional requests" });
+      if (!director) {
+        return res.status(400).json({
+          error: "director_name is required for regional requests",
+        });
+      }
 
       const n = Number(participants_count);
-      if (!Number.isFinite(n) || n <= 0) return res.status(400).json({ error: "participants_count must be > 0" });
+      if (!Number.isFinite(n) || n <= 0) {
+        return res.status(400).json({
+          error: "participants_count must be > 0",
+        });
+      }
 
       payload = {
         ...payload,
+        region: regionFromUser,
         branche: [],
         director_name: director,
         participants_count: n,
@@ -128,10 +173,19 @@ router.post("/", requireAuth, async (req, res) => {
     }
 
     const doc = await RegionSessionRequest.create(payload);
-    return res.status(201).json({ ok: true, request: doc });
+
+    return res.status(201).json({
+      ok: true,
+      request: doc,
+    });
   } catch (err) {
-    if (err?.code === 11000) return res.status(409).json({ error: "Duplicate request" });
-    if (err?.name === "ValidationError") return res.status(400).json({ error: err.message });
+    if (err?.code === 11000) {
+      return res.status(409).json({ error: "Duplicate request" });
+    }
+
+    if (err?.name === "ValidationError") {
+      return res.status(400).json({ error: err.message });
+    }
 
     console.error("POST /api/region-session-requests error:", err);
     return res.status(500).json({ error: "Internal server error" });

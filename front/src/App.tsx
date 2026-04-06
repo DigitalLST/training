@@ -57,6 +57,9 @@ import AjoutSession from './region/screens/AjoutSession';
 import ValidationSessionRegion from'./moderator/screens/ValidationSessionRegion';
 import GestionParticipation from './region/screens/GestionParticipation';
 import ListeParticipants from './region/screens/ListeParticpant';
+import GestionFormationRegion from './region/screens/GestionFormation'
+import GestionAffectationReg from './region/screens/GestionAffectations';
+import FormationFinalRegion from './region/screens/DecisionFormation';
 
 export default function App() {
   return (
@@ -114,6 +117,9 @@ export default function App() {
         <Route path="demandes/new" element={<AjoutSession />} />
         <Route path="gestionparticipants" element={<GestionParticipation />} />
         <Route path="listeparticipants" element={<ListeParticipants />} />
+        <Route path="gestionformations" element={<GestionFormationRegion />} />
+        <Route path="affectations" element={<GestionAffectationReg />} />
+        <Route path="formation_final" element={<FormationFinalRegion />} />
 
 
         </Route>

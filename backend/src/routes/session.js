@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const router = require('express').Router();
 const Session = require('../models/session');
 const Demande = require('../models/demande');
+const Centre = require('../models/centre');
+const Formation = require('../models/formation');
 const requireAuth = require('../middlewares/auth');
 const normalize = (v) => String(v || '').trim();
 const NATIONAL_ORG = 'اللجنة الوطنية لتنمية القيادات';
@@ -83,6 +85,68 @@ router.get('/regional', requireAuth, async (req, res, next) => {
       .lean();
 
     return res.json(sessions);
+  } catch (err) {
+    next(err);
+  }
+});
+router.get('/ma-region', requireAuth, async (req, res, next) => {
+  try {
+    const userRegion = normalize(req.user?.region);
+    if (!userRegion) {
+      return res.status(403).json({ error: 'Missing user region' });
+    }
+
+    const excludedLevels = ['تمهيدية', 'شارة خشبية'];
+
+    const sessions = await Session.find({
+      $and: [
+        {
+          $or: [
+            { organizer: userRegion },
+            { organizerRegion: userRegion },
+            { organizerName: userRegion },
+            { region: userRegion },
+          ],
+        },
+        {
+          $nor: [
+            { trainingLevel: { $in: excludedLevels } },
+            { trainingLevels: { $in: excludedLevels } },
+          ],
+        },
+      ],
+    })
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+
+    const sessionIds = sessions.map((s) => s._id);
+
+    const approvedCounts = await Demande.aggregate([
+      {
+        $match: {
+          session: { $in: sessionIds },
+          statusRegion: 'APPROVED',
+          statusNational: 'APPROVED',
+        },
+      },
+      {
+        $group: {
+          _id: '$session',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const countBySessionId = new Map(
+      approvedCounts.map((x) => [String(x._id), x.count])
+    );
+
+    const enriched = sessions.map((s) => ({
+      ...s,
+      approvedParticipantsCount: countBySessionId.get(String(s._id)) || 0,
+    }));
+
+    return res.json(enriched);
   } catch (err) {
     next(err);
   }
@@ -196,6 +260,93 @@ router.delete('/:id', async (req, res) => {
   } catch (e) {
     console.error('DELETE /sessions cascade error:', e);
     return res.status(500).json({ error: 'Internal error' });
+  }
+});
+router.patch('/:id/training-studies-config', requireAuth, async (req, res, next) => {
+  try {
+    const sessionId = req.params.id;
+    const { studiesCount, trainingCenterId } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session id' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(trainingCenterId)) {
+      return res.status(400).json({ error: 'Invalid trainingCenterId' });
+    }
+
+    const count = Number(studiesCount);
+    if (!Number.isInteger(count) || count < 1) {
+      return res.status(400).json({ error: 'studiesCount must be >= 1' });
+    }
+
+    const currentSession = await Session.findById(sessionId);
+    if (!currentSession) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const centre = await Centre.findById(trainingCenterId);
+    if (!centre) {
+      return res.status(404).json({ error: 'Centre not found' });
+    }
+
+    currentSession.studiesCount = count;
+    currentSession.trainingCenterId = centre._id;
+    await currentSession.save();
+
+    const sessionTitle = String(currentSession.title ?? currentSession.name ?? '').trim();
+
+    const niveau = String(
+      currentSession.trainingLevel ??
+      (Array.isArray(currentSession.trainingLevels) ? currentSession.trainingLevels[0] : '') ??
+      ''
+    ).trim();
+
+    const branches = Array.isArray(currentSession.branches)
+      ? currentSession.branches
+      : Array.isArray(currentSession.branche)
+        ? currentSession.branche
+        : currentSession.branch
+          ? [currentSession.branch]
+          : [];
+
+    if (!niveau) {
+      return res.status(400).json({ error: 'Session training level is missing' });
+    }
+
+    await Formation.deleteMany({ session: currentSession._id });
+
+    const docsToInsert = [];
+
+    for (let i = 1; i <= count; i += 1) {
+      const formationName = count === 1 ? sessionTitle : `${sessionTitle} ${i}`;
+
+      docsToInsert.push({
+        session: currentSession._id,
+        sessionTitleSnapshot: sessionTitle,
+        niveau,
+        centre: centre._id,
+        centreTitleSnapshot: String(centre.title ?? '').trim(),
+        centreRegionSnapshot: String(centre.region ?? '').trim(),
+        nom: formationName,
+        branches,
+      });
+    }
+
+    const createdFormations = await Formation.insertMany(docsToInsert, {
+      ordered: true,
+    });
+
+    return res.json({
+      ok: true,
+      sessionId: currentSession._id,
+      studiesCount: count,
+      trainingCenterId: centre._id,
+      formationsCreated: createdFormations.length,
+      formations: createdFormations,
+    });
+  } catch (err) {
+    next(err);
   }
 });
 

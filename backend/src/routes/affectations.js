@@ -14,6 +14,10 @@ function bad(req, res) {
   if (!e.isEmpty()) return res.status(400).json({ errors: e.array() });
   return null;
 }
+function baseRole(role) {
+  if (!role) return role;
+  return role.replace('_reg', '');
+}
 function rxFromQ(q) {
   if (!q) return null;
   const safe = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -147,7 +151,7 @@ router.get(
   requireAuth,
   [
     param('formationId').isMongoId(),
-    query('role').isIn(['trainer','assistant','director','coach','trainee']),
+    query('role').isIn(['trainer','assistant','director','coach','trainee','trainer_reg','assistant_reg','director_reg','coach_reg']),
     query('q').optional().isString(),
   ],
   async (req, res) => {
@@ -155,7 +159,8 @@ router.get(
     if (e) return;
 
     const { formationId } = req.params;
-    const { role, q } = req.query;
+    const { role: rawRole, q } = req.query;
+    const role = baseRole(rawRole);
     const re = rxFromQ(q);
 
     // ---------- Formation de référence ----------
@@ -378,7 +383,7 @@ router.post(
 
     for (const it of upserts) {
       const userId = it?.userId;
-      const role   = it?.role;
+      const role   = baseRole(it?.role);
 
       if (!userId || !role) {
         return res.status(400).json({ error: 'userId et rôle requis' });

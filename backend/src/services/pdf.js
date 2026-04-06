@@ -12,6 +12,24 @@ function labelDecision(decision) {
   if (decision === 'incompatible') return 'لا يناسب الدور';
   return '—';
 }
+function roleLabelRegion(role) {
+  if (role === 'director_reg') return 'قائد الدراسة';
+  if (role === 'trainer_reg') return 'مساعد قائد الدراسة';
+  if (role === 'assistant_reg') return 'حامل شارة';
+  if (role === 'coach_reg') return 'المرشد الفني';
+  return role || '';
+}
+
+function formatDateArLong(dateValue) {
+  if (!dateValue) return '';
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('ar-TN', {
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit',
+  });
+}
 
 // helper pour formater date+heure en arabe
 function formatDateTimeAr(iso) {
@@ -414,5 +432,77 @@ async function generatePdfFromTemplate(rawData, templateFile) {
     await browser.close();
   }
 }
+async function generateRegionResultsPdf(rawData) {
+  const templatePath = path.join(__dirname, '..', 'views', 'report_region.ejs');
+  const data = JSON.parse(JSON.stringify(rawData || {}));
 
-module.exports = { generateFinalResultsPdf, generatePdfFromTemplate };
+  // session / formation
+  data.sessionTitle = data.sessionTitle || data.session?.title || 'الدورة';
+  data.formationTitle = data.formationTitle || data.formation?.nom || '';
+
+  // centre
+  if (!data.centreLine) {
+    const centreTitle = data.formation?.centreTitle || data.formation?.centre?.title || '';
+    const centreRegion = data.formation?.centreRegion || data.formation?.centre?.region || '';
+    data.centreLine = `${centreTitle}${centreRegion ? ' - ' + centreRegion : ''}`;
+  }
+
+  // période
+  if (!data.periodLine) {
+    const startDate = data.session?.startDate || null;
+    const endDate = data.session?.endDate || null;
+    const startStr = formatDateArLong(startDate);
+    const endStr = formatDateArLong(endDate);
+
+    if (startStr && endStr) data.periodLine = `${startStr} - ${endStr}`;
+    else if (startStr) data.periodLine = `من ${startStr}`;
+    else if (endStr) data.periodLine = `إلى ${endStr}`;
+    else data.periodLine = '';
+  }
+
+  // logo
+  if (!data.logoDataUrl) {
+    try {
+      const logoAbs = path.join(__dirname, '..', 'public', 'fonts', 'logo.png');
+      const logoBuf = fs.readFileSync(logoAbs);
+      data.logoDataUrl = 'data:image/png;base64,' + logoBuf.toString('base64');
+    } catch (err) {
+      data.logoDataUrl = null;
+    }
+  }
+
+  // team regional labels
+  data.team = (data.team || []).map(m => ({
+    ...m,
+    roleLabel: m.roleLabel || roleLabelRegion(m.role),
+  }));
+
+  // sécurisation trainees
+  data.trainees = (data.trainees || []).map(t => ({
+    idScout: t.idScout || '',
+    prenom: t.prenom || '',
+    nom: t.nom || '',
+    region: t.region || '',
+    email: t.email || '',
+  }));
+
+  const html = await ejs.renderFile(templatePath, data, { async: true });
+
+  const browser = await launchBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+
+    return pdfBuffer;
+  } finally {
+    await browser.close();
+  }
+}
+
+module.exports = { generateFinalResultsPdf, generatePdfFromTemplate,generateRegionResultsPdf };

@@ -6,7 +6,14 @@ const FormationSchema = new mongoose.Schema({
   session: { type: mongoose.Schema.Types.ObjectId, ref: 'Session', required: true, index: true },
   sessionTitleSnapshot: { type: String, default: '' },
 
-  niveau: { type: String, enum: ['تمهيدية', 'شارة خشبية'], required: true, index: true },
+  niveau: { type: String, enum: [
+  "تمهيدية",
+  "شارة خشبية",
+  "S1",
+  "S2",
+  "S3",
+  "الدراسة الابتدائية"
+], required: true, index: true },
 
   // Centre d'accueil
   centre: { type: mongoose.Schema.Types.ObjectId, ref: 'Centre', required: true, index: true },
