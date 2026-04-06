@@ -112,8 +112,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   }, [nav]);
 
   const fid = ctx?.fid || null;
-
-const downloadPdf = async () => {
+  const downloadPdf = async () => {
   if (!fid) return;
 
   try {
@@ -134,6 +133,7 @@ const downloadPdf = async () => {
           }
         : {},
     });
+   
 
     if (!res.ok) {
       const text = await res.text();
@@ -148,6 +148,7 @@ const downloadPdf = async () => {
 
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
+    console.log('DOWNLOAD URL =', url);
 
     const a = document.createElement('a');
     a.href = url;
