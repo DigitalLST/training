@@ -151,22 +151,12 @@ export default function FormationFinalRegion(): React.ReactElement | null {
       const text = await res.text();
       throw new Error(text || 'Erreur téléchargement PDF');
     }
-    console.log('status =', res.status);
-    console.log('content-type =', res.headers.get('content-type'));
-    console.log('content-length =', res.headers.get('content-length'));
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/pdf')) {
-        const text = await res.text();
-        console.error('NON PDF RESPONSE =', text);
-        throw new Error(text || 'La réponse n’est pas un PDF');
-    }
 
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'rapport_region.pdf';
     document.body.appendChild(a);
     a.click();
     a.remove();
