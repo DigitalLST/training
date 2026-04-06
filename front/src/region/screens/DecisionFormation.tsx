@@ -125,51 +125,50 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   }, [nav]);
 
   const fid = ctx?.fid || null;
-
   const downloadPdf = async () => {
-    if (!fid) return;
+  if (!fid) return;
 
-    try {
-      setDownloading(true);
-      setErr(null);
+  try {
+    setDownloading(true);
+    setErr(null);
 
-      const requestUrl = `${API_BASE}/final-decisions/formations/${fid}/report-region`;
-      console.log('REQUEST URL =', requestUrl);
+    const token =
+      localStorage.getItem('token') ||
+      sessionStorage.getItem('token') ||
+      localStorage.getItem('access_token') ||
+      sessionStorage.getItem('access_token');
 
-      const res = await fetch(requestUrl, {
-        method: 'GET',
-        headers,
-        cache: 'no-store',
-      });
+    const res = await fetch(`/api/final-decisions/formations/${fid}/report-region`, {
+      method: 'GET',
+      headers: token
+        ? {
+            Authorization: `Bearer ${token}`,
+          }
+        : {},
+    });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || 'Erreur lors du téléchargement du PDF');
-      }
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/pdf')) {
-        const text = await res.text();
-        throw new Error(text || 'La réponse reçue n’est pas un PDF valide');
-      }
-
-      const blob = await res.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = 'rapport_region.pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (e: any) {
-      setErr(e?.message || 'تعذّر تحميل بطاقة النتائج');
-    } finally {
-      setDownloading(false);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || 'Erreur téléchargement PDF');
     }
-  };
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rapport_region.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.URL.revokeObjectURL(url);
+  } catch (e: any) {
+    setErr(e?.message || 'تعذّر تحميل PDF');
+  } finally {
+    setDownloading(false);
+  }
+};
 
   React.useEffect(() => {
     (async () => {
