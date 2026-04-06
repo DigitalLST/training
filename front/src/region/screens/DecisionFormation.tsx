@@ -4,7 +4,7 @@ import { api } from '../../api/api';
 
 const RED = '#e20514';
 const STORE_KEY = 'aff_ctx_v2';
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
+//const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 
 type Ctx = {
   fid?: string | null;
@@ -104,7 +104,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   const [downloading, setDownloading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
-  const headers = React.useMemo(() => {
+  /*const headers = React.useMemo(() => {
     const h: Record<string, string> = {};
     const t =
       localStorage.getItem('token') ||
@@ -115,7 +115,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
     if (t) h.Authorization = `Bearer ${t}`;
     return h;
   }, []);
-
+*/
   React.useEffect(() => {
     const stored = readCtxFromStorage();
     setCtx(stored);
@@ -138,7 +138,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
       localStorage.getItem('access_token') ||
       sessionStorage.getItem('access_token');
 
-    const res = await fetch(`/final-decisions/formations/${fid}/report-region`, {
+    const res = await fetch(`api/final-decisions/formations/${fid}/report-region`, {
       method: 'GET',
       headers: token
         ? {
