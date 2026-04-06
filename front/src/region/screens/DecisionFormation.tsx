@@ -4,7 +4,7 @@ import { api } from '../../api/api';
 
 const RED = '#e20514';
 const STORE_KEY = 'aff_ctx_v2';
-//const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 
 type Ctx = {
   fid?: string | null;
@@ -48,6 +48,13 @@ type FinalDecisionLite = {
   decision?: 'success' | 'retake' | 'incompatible' | null;
   status: 'draft' | 'pending_team' | 'validated';
 };
+
+function headers(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  const t = localStorage.getItem('token');
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
+}
 
 function readCtxFromStorage(): Ctx | null {
   try {
@@ -104,18 +111,6 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   const [downloading, setDownloading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
-  /*const headers = React.useMemo(() => {
-    const h: Record<string, string> = {};
-    const t =
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('token') ||
-      localStorage.getItem('access_token') ||
-      sessionStorage.getItem('access_token');
-
-    if (t) h.Authorization = `Bearer ${t}`;
-    return h;
-  }, []);
-*/
   React.useEffect(() => {
     const stored = readCtxFromStorage();
     setCtx(stored);
@@ -125,49 +120,47 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   }, [nav]);
 
   const fid = ctx?.fid || null;
+
   const downloadPdf = async () => {
-  if (!fid) return;
+    if (!fid) return;
 
-  try {
-    setDownloading(true);
-    setErr(null);
+    try {
+      setDownloading(true);
+      setErr(null);
 
-    const token =
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('token') ||
-      localStorage.getItem('access_token') ||
-      sessionStorage.getItem('access_token');
+      const url = `${API_BASE}/final-decisions/formations/${fid}/report-region?ts=${Date.now()}`;
 
-    const res = await fetch(`api/final-decisions/formations/${fid}/report-region`, {
-      method: 'GET',
-      headers: token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {},
-    });
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: headers(),
+        cache: 'no-store',
+      });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || 'Erreur téléchargement PDF');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+      const contentType = r.headers.get('content-type') || '';
+      if (!contentType.includes('application/pdf')) {
+        const text = await r.text();
+        throw new Error(text || 'تعذّر تحميل ملف PDF');
+      }
+
+      const blob = await r.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `report_region_${fid}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10_000);
+    } catch (e: any) {
+      setErr(e?.message || 'تعذّر تحميل PDF');
+    } finally {
+      setDownloading(false);
     }
-
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    window.URL.revokeObjectURL(url);
-  } catch (e: any) {
-    setErr(e?.message || 'تعذّر تحميل PDF');
-  } finally {
-    setDownloading(false);
-  }
-};
+  };
 
   React.useEffect(() => {
     (async () => {
