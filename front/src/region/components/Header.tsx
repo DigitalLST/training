@@ -10,8 +10,8 @@ import { useNavigate } from 'react-router-dom';
 const MENU = [
   { label: 'الرئيسية',               to: '/acceuil',   },
   { label: 'مطلب تنظيم دورة تدريبية',   to: '/region/demandes', activeFor: ['/region/demandes','/region/demandes/new']  },
-  { label: ' ادارة مطالب المشاركة',    to: '/region/gestionparticipants', activeFor: ['/region/gestionparticipants']   },
-  { label: 'إدارة الدراسات التدريبية ',    to: '/region/gestionformations', activeFor: ['/region/gestionformations']    },
+  { label: ' ادارة مطالب المشاركة',    to: '/region/gestionparticipants', activeFor: ['/region/gestionparticipants','/region/listeparticipants']   },
+  { label: 'إدارة الدراسات التدريبية ',    to: '/region/gestionformations', activeFor: ['/region/gestionformations','/region/affectations','/region/formation_final']    },
 ];
 
 
