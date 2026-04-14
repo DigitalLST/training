@@ -5,6 +5,7 @@ const RegionSessionRequest = require("../models/demandeRegion");
 const requireAuth = require("../middlewares/auth");
 const Session = require("../models/session");
 const User = require("../models/user");
+const SignatoryMandate = require("../models/signatoryMandate");
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime());
 
@@ -471,10 +472,9 @@ router.patch("/:id/inscription-dates", requireAuth, async (req, res) => {
  * GET /api/region-session-requests/:id/approval-pdf
  * Télécharge le PDF du مقرر après validation nationale
  */
-/**
- * GET /api/region-session-requests/:id/approval-pdf
- * Télécharge le PDF du مقرر après validation nationale
- */
+// ======================================================
+// 2) REMPLACE TA ROUTE approval-pdf PAR CELLE-CI
+// ======================================================
 router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
   try {
     const requestId = String(req.params.id || "").trim();
@@ -493,7 +493,7 @@ router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Request not found" });
     }
 
-    // permissions
+    // droits d'accès
     if (!(isAdmin || isModerator || isNational)) {
       if (!regionFromUser) {
         return res.status(400).json({ error: "User has no region set" });
@@ -504,7 +504,6 @@ router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
       }
     }
 
-    // only approved
     if (reqDoc.status !== "APPROVED") {
       return res.status(400).json({
         error: "PDF available only after approval",
@@ -517,9 +516,9 @@ router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
       });
     }
 
-    // session
+    // session créée après validation
     const sessionDoc = await Session.findById(reqDoc.generated_session_id)
-      .select("title trainingLevels startDate endDate organizer location")
+      .select("title trainingLevels startDate endDate organizer location createdAt")
       .lean();
 
     if (!sessionDoc) {
@@ -536,25 +535,36 @@ router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
       logoDataUrl = "data:image/png;base64," + logoBuf.toString("base64");
     } catch (e) {}
 
-    // CN President
-    const cnPresident = await User.findOne({
-      isNational: true,
-      role: "cn_president",
+    // ==================================================
+    // CN PRESIDENT depuis SignatoryMandate actif
+    // ==================================================
+    const activeMandate = await SignatoryMandate.findOne({
+      type: "cn_president",
+      endDate: null,
     })
-      .select("prenom nom signatureUrl")
+      .populate({
+        path: "user",
+        select: "prenom nom signatureUrl",
+      })
       .lean();
 
+    const cnPresident = activeMandate?.user || null;
+
+    // ==================================================
+    // issueDate = createdAt de la session
+    // ==================================================
     const pdfData = buildRegionSessionApprovalTemplateData({
       reqDoc,
       sessionDoc,
       cnPresident,
       logoDataUrl,
       referenceNumber: "761/103",
+      issueDate: sessionDoc.createdAt,
     });
 
     const pdfBuffer = await generatePdfFromTemplate(
       pdfData,
-      "regional_session_approval.ejs"
+      "region_session_approval.ejs"
     );
 
     const asciiFilename = `decision_${requestId}.pdf`;
