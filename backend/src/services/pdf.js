@@ -141,6 +141,7 @@ function buildRegionSessionApprovalTemplateData({
   cnPresident,
   logoDataUrl = null,
   referenceNumber = '761/103',
+  issueDate=null,
 }) {
   const cnPresidentName = cnPresident
     ? `${cnPresident.prenom || ''} ${cnPresident.nom || ''}`.trim()
@@ -149,8 +150,9 @@ function buildRegionSessionApprovalTemplateData({
   return {
     logoDataUrl,
     referenceNumber,
-    issueDate: formatDateTunisia(new Date()),
+    issueDate: formatDateTunisia(issueDate || sessionDoc?.createdAt || new Date()),
     region: reqDoc?.region || '',
+    location: reqDoc?.location || '', 
     sessionTitle: sessionDoc?.title || reqDoc?.name || 'الدورة',
     daysText: buildArabicDaysText(sessionDoc?.startDate, sessionDoc?.endDate),
     directorName: reqDoc?.director_name || '—',
