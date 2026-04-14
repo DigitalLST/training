@@ -110,6 +110,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
   const [saving, setSaving] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [sessionVisible, setSessionVisible] = React.useState(false);
 
   React.useEffect(() => {
     const stored = readCtxFromStorage();
@@ -176,6 +177,13 @@ export default function FormationFinalRegion(): React.ReactElement | null {
           api(`/final-decisions/formations/${fid}`),
         ]);
 
+        let nextSessionVisible = false;
+        if (formationRes?.sessionId) {
+          const sessionRes = await api(`/sessions/${formationRes.sessionId}`);
+          nextSessionVisible = !!sessionRes?.isVisible;
+        }
+        setSessionVisible(nextSessionVisible);
+
         const formationData: FormationInfo = {
           _id: formationRes?._id,
           sessionId: formationRes?.sessionId,
@@ -208,9 +216,7 @@ export default function FormationFinalRegion(): React.ReactElement | null {
 
         const successSet = new Set(
           decisions
-            .filter(
-              d => d && d.traineeId && d.decision === 'success' && d.status === 'validated'
-            )
+            .filter(d => d && d.traineeId && d.decision === 'success' && d.status === 'validated')
             .map(d => String(d.traineeId))
         );
 
@@ -230,7 +236,9 @@ export default function FormationFinalRegion(): React.ReactElement | null {
 
   if (!ctx?.fid) return null;
 
-  const locked = lockAfter7Days(formation?.endDate);
+  const lockedByDate = lockAfter7Days(formation?.endDate);
+  const lockedBySession = sessionVisible;
+  const locked = lockedBySession || lockedByDate ;
 
   async function onValidate() {
     if (!fid || locked) return;
@@ -246,12 +254,23 @@ export default function FormationFinalRegion(): React.ReactElement | null {
           participated: !!checked[String(r.user!._id)],
         }));
 
-      await api(`/final-decisions/formations/${fid}/validate-region`, {
+      const result = await api(`/final-decisions/formations/${fid}/validate-region`, {
         method: 'POST',
         body: JSON.stringify({ items }),
       });
 
-      alert('تم الحفظ');
+      if (formation?.sessionId) {
+        const sessionRes = await api(`/sessions/${formation.sessionId}`);
+        setSessionVisible(!!sessionRes?.isVisible);
+      }
+
+      if (result?.sessionIsNowVisible) {
+        alert('تم الحفظ بنجاح.');
+      } else {
+        alert(
+          `تم الحفظ.\nتم اعتماد ${result?.validatedFormations || 0} من أصل ${result?.totalFormations || 0} دراسة/دراسات في هذه الجلسة.`
+        );
+      }
     } catch (e: any) {
       setErr(e?.message || 'تعذّر الحفظ');
     } finally {
@@ -286,7 +305,9 @@ export default function FormationFinalRegion(): React.ReactElement | null {
 
           {locked && (
             <div style={{ color: '#b91c1c', fontSize: 12 }}>
-              انتهت مهلة التعديل بعد 7 أيام من تاريخ نهاية الدورة
+              {lockedBySession
+                ? 'تم غلق هذه الجلسة بعد اعتماد جميع الدراسات'
+                : 'انتهت مهلة التعديل بعد 7 أيام من تاريخ نهاية الدورة'}
             </div>
           )}
         </div>

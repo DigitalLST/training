@@ -11,21 +11,18 @@ export default function DemandeSession(): React.JSX.Element {
 
   const [sessionType, setSessionType] = useState<SessionType>('NATIONAL');
 
-  // مشتركة
   const [title, setTitle] = useState('');
+  const [location, setLocation] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // dates مشتركة
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // ✅ وطنية: ممكن تختار الاثنين
   const [trainingLevels, setTrainingLevels] = useState<string[]>(['تمهيدية']);
   const [branche, setBranches] = useState<string[]>([]);
 
-  // ✅ جهوية: اختيار واحد
-  const [regionalLevel, setRegionalLevel] = useState(''); // S1/S2/S3/الدراسة الابتدائية
+  const [regionalLevel, setRegionalLevel] = useState('');
   const [directorName, setDirectorName] = useState('');
   const [participantsCount, setParticipantsCount] = useState<string>('');
 
@@ -35,8 +32,6 @@ export default function DemandeSession(): React.JSX.Element {
     if (t) h.Authorization = `Bearer ${t}`;
     return h;
   }, []);
-
- 
 
   function toggleBranch(branch: string) {
     setBranches((prev) => (prev.includes(branch) ? prev.filter((b) => b !== branch) : [...prev, branch]));
@@ -57,7 +52,6 @@ export default function DemandeSession(): React.JSX.Element {
     e.preventDefault();
     setErr(null);
 
-    // validations مشتركة
     if (!title.trim()) return setErr('يرجى إدخال العنوان');
     if (!startDate || !endDate) return setErr('تاريخا البداية والنهاية إجباريان');
     if (new Date(endDate) < new Date(startDate)) return setErr('تاريخ النهاية يجب أن يكون بعد تاريخ البداية');
@@ -65,30 +59,28 @@ export default function DemandeSession(): React.JSX.Element {
     try {
       setSubmitting(true);
 
-      // ✅ ALWAYS send to /region-session-requests (RegionSessionRequest)
-      // ✅ NEW: use training_levels (array) for both national & regional
       let payload: any = {
         name: title.trim(),
+        location: location.trim(),
         startDate,
-        endDate
+        endDate,
       };
 
       if (sessionType === 'NATIONAL') {
-        // لازم يختار تمهيدية و/أو شارة خشبية
-        if (trainingLevels.length === 0) return setErr('اختر المستوى التدريبي (تمهيدية و/أو شارة خشبية)');
+        if (trainingLevels.length === 0) return setErr('اختر المستوى التدريبي');
         if (branche.length === 0) return setErr('اختر القسم الفني');
 
         payload = {
           ...payload,
-          training_levels: trainingLevels, // ✅ 1 request, 1 row in DB
-          branche
+          training_levels: trainingLevels,
+          branche,
         };
 
         const res = await fetch(`${API_BASE}/region-session-requests`, {
           method: 'POST',
           headers,
           cache: 'no-store',
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
         });
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -97,25 +89,26 @@ export default function DemandeSession(): React.JSX.Element {
         return;
       }
 
-      // sessionType === 'REGIONAL'
       if (!regionalLevel) return setErr('اختر نوع الدورة الجهوية');
       if (!directorName.trim()) return setErr('يرجى إدخال اسم القائد');
+
       const n = Number(participantsCount);
-      if (!Number.isFinite(n) || n <= 0) return setErr('العدد المتوقع للمشاركين يجب أن يكون رقمًا أكبر من 0');
+      if (!Number.isFinite(n) || n <= 0) {
+        return setErr('العدد المتوقع للمشاركين يجب أن يكون رقمًا أكبر من 0');
+      }
 
       payload = {
         ...payload,
-        training_levels: [regionalLevel], // ✅ 1 element array
+        training_levels: [regionalLevel],
         director_name: directorName.trim(),
-        participants_count: n
-        // branches not needed for regional (backend will force [])
+        participants_count: n,
       };
 
       const res = await fetch(`${API_BASE}/region-session-requests`, {
         method: 'POST',
         headers,
         cache: 'no-store',
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -143,7 +136,6 @@ export default function DemandeSession(): React.JSX.Element {
       <div style={styles.redLine} />
 
       <form onSubmit={onSubmit} style={styles.form} noValidate>
-        {/* نوع الدورة */}
         <div style={styles.field}>
           <label style={styles.label}>
             نوع الدورة <span style={{ color: RED }}>*</span>
@@ -177,7 +169,6 @@ export default function DemandeSession(): React.JSX.Element {
           </div>
         </div>
 
-        {/* العنوان */}
         <div style={styles.field}>
           <label style={styles.label}>
             العنوان <span style={{ color: RED }}>*</span>
@@ -192,23 +183,44 @@ export default function DemandeSession(): React.JSX.Element {
           />
         </div>
 
-        {/* dates */}
+        <div style={styles.field}>
+          <label style={styles.label}>المكان</label>
+          <input
+            type="text"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="مكان الدورة"
+            style={styles.input}
+          />
+        </div>
+
         <div style={styles.row2}>
           <div style={styles.field}>
             <label style={styles.label}>
               تاريخ البداية <span style={{ color: RED }}>*</span>
             </label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={styles.input} required />
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              style={styles.input}
+              required
+            />
           </div>
           <div style={styles.field}>
             <label style={styles.label}>
               تاريخ النهاية <span style={{ color: RED }}>*</span>
             </label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={styles.input} required />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              style={styles.input}
+              required
+            />
           </div>
         </div>
 
-        {/* ======== وطنية ======== */}
         {sessionType === 'NATIONAL' && (
           <>
             <div style={styles.field}>
@@ -217,11 +229,7 @@ export default function DemandeSession(): React.JSX.Element {
               </label>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={true}
-                    disabled
-                  />
+                  <input type="checkbox" checked={true} disabled />
                   <span>تمهيدية</span>
                 </label>
               </div>
@@ -243,7 +251,6 @@ export default function DemandeSession(): React.JSX.Element {
           </>
         )}
 
-        {/* ======== جهوية ======== */}
         {sessionType === 'REGIONAL' && (
           <>
             <div style={styles.field}>
@@ -303,7 +310,6 @@ export default function DemandeSession(): React.JSX.Element {
   );
 }
 
-/* --------- styles --------- */
 const styles: Record<string, React.CSSProperties> = {
   toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 },

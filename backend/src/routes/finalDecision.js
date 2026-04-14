@@ -10,11 +10,13 @@ const Formation = require('../models/formation');
 const SessionAffectation = require('../models/affectation');
 const FormationReport = require('../models/formationReport');
 const Session = require('../models/session');
-const Demande = require('../models/demande'); 
+const Demande = require('../models/demande');
+const RegionalSessionValidation = require('../models/regionalSessionValidation');
+const User = require('../models/user');
 const archiver = require('archiver');
 const {
   generatePdfFromTemplate,
-  generateFinalResultsPdf
+  generateFinalResultsPdf,
 } = require('../services/pdf');
 
 const router = express.Router();
@@ -27,20 +29,29 @@ function bad(req, res) {
   return null;
 }
 
-// petite fonction util pour calculer les totaux depuis Evaluation.items
-function computeTotals(ev) {
+function isDetailedLevel(level) {
+  const v = String(level || '').trim();
+  return v === 'تمهيدية' || v === 'شارة خشبية';
+}
+
+function computeTotals(ev, formationLevel) {
+  if (!isDetailedLevel(formationLevel)) {
+    return { totalNote: 10, totalMax: 10, pct: 100 };
+  }
+
   if (!ev || !Array.isArray(ev.items)) {
     return { totalNote: 0, totalMax: 0, pct: 0 };
   }
+
   const totalMax = ev.items.reduce((sum, it) => sum + (Number(it.maxnote) || 0), 0);
   const totalNote = ev.items.reduce((sum, it) => sum + (Number(it.note) || 0), 0);
   const pct = totalMax > 0 ? Math.round((totalNote / totalMax) * 1000) / 10 : 0;
+
   return { totalNote, totalMax, pct };
 }
 
 /**
  * ⚠️ Validateurs = director + trainer uniquement
- * On calcule l'équipe "coreTeam" (validateurs) pour décider du status
  */
 async function getCoreTeamUserIds(formationId) {
   const teamAffects = await SessionAffectation.find({
@@ -50,16 +61,9 @@ async function getCoreTeamUserIds(formationId) {
     .select('user role')
     .lean();
 
-  return teamAffects
-    .map(a => (a.user ? String(a.user) : null))
-    .filter(Boolean);
+  return teamAffects.map(a => (a.user ? String(a.user) : null)).filter(Boolean);
 }
 
-/**
- * ✅ Applique la logique de validation "comme evaluation"
- * - si coreTeam = [director] uniquement => validated dès que director approuve
- * - sinon validated quand tous les users du coreTeam ont approuvé
- */
 function computeStatusForApprovals(coreTeamUserIds, approvals) {
   const approvedUserIds = (approvals || [])
     .filter(a => ['director', 'trainer'].includes(a.role))
@@ -72,9 +76,198 @@ function computeStatusForApprovals(coreTeamUserIds, approvals) {
   return { status: 'pending_team', allApproved: false };
 }
 
+/* ----------------- helpers régional ----------------- */
+
+async function promoteRegionalUsersForPrimaryStudy(sessionId) {
+  const primaryStudyFormations = await Formation.find({
+    session: sessionId,
+    niveau: 'الدراسة الابتدائية',
+  })
+    .select('_id')
+    .lean();
+
+  if (!primaryStudyFormations.length) return 0;
+
+  const formationIds = primaryStudyFormations.map(f => f._id);
+
+  const successDecisions = await FinalDecision.find({
+    session: sessionId,
+    formation: { $in: formationIds },
+    status: 'validated',
+    decision: 'success',
+  })
+    .select('trainee')
+    .lean();
+
+  const traineeIds = [...new Set(successDecisions.map(d => String(d.trainee)))];
+  if (!traineeIds.length) return 0;
+
+  const result = await User.updateMany(
+    {
+      _id: { $in: traineeIds },
+      niveau: 'بدون تدريب',
+    },
+    {
+      $set: { niveau: 'إبتدائية' },
+    }
+  );
+
+  return result.modifiedCount || 0;
+}
+
+async function recomputeRegionalSessionValidation(sessionId, userId = null) {
+  const formations = await Formation.find({ session: sessionId })
+    .select('_id nom niveau')
+    .lean();
+
+  if (!formations.length) {
+    await RegionalSessionValidation.findOneAndUpdate(
+      { session: sessionId },
+      {
+        $set: {
+          totalFormations: 0,
+          validatedFormations: 0,
+          isCompleted: false,
+          status: 'draft',
+          formations: [],
+          lastCheckedAt: new Date(),
+          completedAt: null,
+          lastUpdatedBy: userId || null,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await Session.findByIdAndUpdate(sessionId, {
+      $set: { isVisible: false },
+    });
+
+    return {
+      isCompleted: false,
+      totalFormations: 0,
+      validatedFormations: 0,
+      promotedUsers: 0,
+    };
+  }
+
+  const formationIds = formations.map(f => f._id);
+
+  const traineeAffects = await SessionAffectation.find({
+    formation: { $in: formationIds },
+    role: 'trainee',
+  })
+    .select('formation user')
+    .lean();
+
+  const finalDecisions = await FinalDecision.find({
+    session: sessionId,
+    formation: { $in: formationIds },
+    status: 'validated',
+  })
+    .select('formation trainee status')
+    .lean();
+
+  const validatedKeySet = new Set(
+    finalDecisions.map(fd => `${String(fd.formation)}::${String(fd.trainee)}`)
+  );
+
+  const formationsProgress = [];
+  let validatedFormations = 0;
+  let hasError = false;
+
+  for (const formation of formations) {
+    const formationTrainees = traineeAffects.filter(
+      a => String(a.formation) === String(formation._id)
+    );
+
+    const traineesCount = formationTrainees.length;
+
+    if (traineesCount === 0) {
+      formationsProgress.push({
+        formation: formation._id,
+        formationName: formation.nom || '',
+        niveau: formation.niveau || '',
+        traineesCount: 0,
+        validatedCount: 0,
+        isValidated: false,
+        errorCode: 'NO_AFFECTATIONS',
+        errorMessage: 'Aucune affectation trainee pour cette formation',
+      });
+      hasError = true;
+      continue;
+    }
+
+    const expectedKeys = formationTrainees.map(
+      a => `${String(a.formation)}::${String(a.user)}`
+    );
+
+    const validatedCount = expectedKeys.filter(key => validatedKeySet.has(key)).length;
+    const isValidated = validatedCount === traineesCount;
+
+    if (isValidated) validatedFormations += 1;
+    else hasError = true;
+
+    formationsProgress.push({
+      formation: formation._id,
+      formationName: formation.nom || '',
+      niveau: formation.niveau || '',
+      traineesCount,
+      validatedCount,
+      isValidated,
+      errorCode: isValidated ? null : 'PARTIAL_VALIDATION',
+      errorMessage: isValidated
+        ? ''
+        : 'Tous les trainees de cette formation ne sont pas encore validés',
+    });
+  }
+
+  const totalFormations = formations.length;
+  const isCompleted = totalFormations > 0 && validatedFormations === totalFormations;
+
+  let status = 'draft';
+  if (isCompleted) status = 'completed';
+  else if (validatedFormations > 0 && hasError) status = 'error';
+  else if (validatedFormations > 0) status = 'in_progress';
+  else if (hasError) status = 'error';
+
+  const now = new Date();
+
+  await RegionalSessionValidation.findOneAndUpdate(
+    { session: sessionId },
+    {
+      $set: {
+        totalFormations,
+        validatedFormations,
+        isCompleted,
+        status,
+        formations: formationsProgress,
+        lastCheckedAt: now,
+        completedAt: isCompleted ? now : null,
+        lastUpdatedBy: userId || null,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  await Session.findByIdAndUpdate(sessionId, {
+    $set: { isVisible: isCompleted },
+  });
+
+  let promotedUsers = 0;
+  if (isCompleted) {
+    promotedUsers = await promoteRegionalUsersForPrimaryStudy(sessionId);
+  }
+
+  return {
+    isCompleted,
+    totalFormations,
+    validatedFormations,
+    promotedUsers,
+  };
+}
+
 /* ----------- préparation des données du report ----------- */
 async function buildFinalResultsReportData(formationId) {
-  // 1) Formation + session + centre
   const formation = await Formation.findById(formationId)
     .populate({ path: 'centre', select: 'title region' })
     .populate({ path: 'session', select: 'title startDate endDate' })
@@ -86,7 +279,6 @@ async function buildFinalResultsReportData(formationId) {
     throw err;
   }
 
-  // ✅ CN validations (president + commissioner) depuis Session.validations
   let cnPresident = null;
   let cnCommissioner = null;
 
@@ -124,7 +316,6 @@ async function buildFinalResultsReportData(formationId) {
     }
   }
 
-  // 2) Affectations trainees
   const traineeAffects = await SessionAffectation.find({
     formation: formationId,
     role: 'trainee',
@@ -152,7 +343,6 @@ async function buildFinalResultsReportData(formationId) {
     });
   }
 
-  // 3) Décisions finales
   const decisionsDocs = await FinalDecision.find({
     formation: formationId,
   })
@@ -160,7 +350,6 @@ async function buildFinalResultsReportData(formationId) {
     .populate({ path: 'approvals.user', select: 'prenom nom' })
     .lean();
 
-  // 4) Évaluations validées
   const evalDocs = await Evaluation.find({
     formation: formationId,
     status: 'validated',
@@ -187,7 +376,6 @@ async function buildFinalResultsReportData(formationId) {
     evalByTraineeId.set(uid, ev);
   }
 
-  // 5) lignes trainees
   let successCount = 0;
   let retakeCount = 0;
   let incompatibleCount = 0;
@@ -197,14 +385,22 @@ async function buildFinalResultsReportData(formationId) {
   for (const fd of decisionsDocs) {
     const t = fd.trainee;
     if (!t) continue;
+
     const traineeId = t._id ? String(t._id) : String(t);
-
-    const evalForT = evalByTraineeId.get(traineeId);
-    if (!evalForT) continue;
-
-    const totals = computeTotals(evalForT);
     const affect = affectByUserId.get(traineeId) || {};
     const decision = fd.decision || null;
+    const evalForT = evalByTraineeId.get(traineeId) || null;
+
+    let totals;
+    if (isDetailedLevel(formation.niveau)) {
+      if (!evalForT) continue;
+      totals = computeTotals(evalForT, formation.niveau);
+    } else {
+      const totalNote = fd.totalNote != null ? Number(fd.totalNote) : 10;
+      const totalMax = fd.totalMax != null ? Number(fd.totalMax) : 10;
+      const pct = totalMax > 0 ? Math.round((totalNote / totalMax) * 1000) / 10 : 0;
+      totals = { totalNote, totalMax, pct };
+    }
 
     if (decision === 'success') successCount++;
     if (decision === 'retake') retakeCount++;
@@ -225,7 +421,6 @@ async function buildFinalResultsReportData(formationId) {
     });
   }
 
-  // 6) équipe (direction + staff)
   const teamAffects = await SessionAffectation.find({
     formation: formationId,
     role: { $in: ['director', 'trainer', 'assistant', 'coach'] },
@@ -289,7 +484,6 @@ async function buildFinalResultsReportData(formationId) {
 
   const director = team.find(m => m.role === 'director') || null;
 
-  // Rapports director / coach
   const directorReportDoc = await FormationReport.findOne({
     formation: formationId,
     role: 'director',
@@ -372,8 +566,8 @@ async function buildFinalResultsReportData(formationId) {
     cnCommissioner,
   };
 }
+
 async function buildSessionResultsReportData(sessionId) {
-  // Session + validations CN
   const sessionDoc = await Session.findById(sessionId)
     .select('title startDate endDate organizer validations')
     .populate('validations.president.validatedBy', 'prenom nom signatureUrl')
@@ -386,7 +580,6 @@ async function buildSessionResultsReportData(sessionId) {
     throw err;
   }
 
-  // CN
   let cnPresident = null;
   let cnCommissioner = null;
 
@@ -414,7 +607,6 @@ async function buildSessionResultsReportData(sessionId) {
     };
   }
 
-  // Demandes de la session (source vérité pour branche + snapshot identité/région)
   const demandes = await Demande.find({ session: sessionId })
     .select('applicant applicantSnapshot branche')
     .lean();
@@ -430,9 +622,7 @@ async function buildSessionResultsReportData(sessionId) {
     });
   }
 
-  // Final decisions de la session + formation join (pour niveau + nom formation)
-  // ✅ si tu veux seulement les validées: ajoute status:'validated'
-  const fds = await FinalDecision.find({ session: sessionId /*, status:'validated'*/ })
+  const fds = await FinalDecision.find({ session: sessionId })
     .select('trainee formation decision status')
     .populate({ path: 'formation', select: 'nom niveau' })
     .lean();
@@ -441,8 +631,7 @@ async function buildSessionResultsReportData(sessionId) {
   for (const fd of fds) {
     const traineeId = String(fd.trainee);
     const d = demandeByApplicant.get(traineeId);
-
-    if (!d) continue; // pas de demande => on skip (ou fallback si tu veux)
+    if (!d) continue;
 
     trainees.push({
       traineeId,
@@ -450,8 +639,8 @@ async function buildSessionResultsReportData(sessionId) {
       prenom: d.prenom,
       nom: d.nom,
       region: d.region,
-      branche: d.branche,                        // ✅ demande
-      trainingLevel: fd.formation?.niveau || '—',// ✅ formation
+      branche: d.branche,
+      trainingLevel: fd.formation?.niveau || '—',
       formationTitle: fd.formation?.nom || '—',
       decision: fd.decision || null,
       status: fd.status || 'draft',
@@ -471,6 +660,7 @@ async function buildSessionResultsReportData(sessionId) {
     cnCommissioner,
   };
 }
+
 async function buildRegionReportData(formationId) {
   const formation = await Formation.findById(formationId)
     .populate({ path: 'centre', select: 'title region' })
@@ -526,7 +716,6 @@ async function buildRegionReportData(formationId) {
 
 /* =========================================================
  * GET /mine-formations
- * Liste des formations où je peux intervenir sur les décisions finales
  * ========================================================= */
 router.get('/mine-formations', requireAuth, async (req, res) => {
   try {
@@ -601,10 +790,6 @@ router.get(
 );
 
 /* ----------------- POST /formations/:formationId ----------------- */
-/**
- * POST /api/final-decisions/formations/:formationId
- * Body: { decisions: [{ traineeId, decision }] }
- */
 router.post(
   '/formations/:formationId',
   requireAuth,
@@ -615,17 +800,15 @@ router.post(
 
     const { formationId } = req.params;
     const { decisions } = req.body;
-
     const allowed = ['success', 'retake', 'incompatible'];
 
     try {
-      const formation = await Formation.findById(formationId).select('_id session').lean();
+      const formation = await Formation.findById(formationId).select('_id session niveau').lean();
       if (!formation) return res.status(404).json({ message: 'Formation introuvable' });
 
       const sessionId = formation.session;
       const meId = (req.user && (req.user.id || req.user._id)) || null;
 
-      // est-ce que l'utilisateur est director sur cette formation ?
       let isDirector = false;
       if (meId) {
         const myAff = await SessionAffectation.findOne({
@@ -636,21 +819,11 @@ router.post(
         isDirector = !!myAff;
       }
 
-      // ✅ coreTeam validateurs
       const coreTeamUserIds = await getCoreTeamUserIds(formationId);
-
       const resultDocs = [];
 
       for (const d of decisions) {
         if (!d.traineeId || !allowed.includes(d.decision)) continue;
-
-        const evaluation = await Evaluation.findOne({
-          session: sessionId,
-          formation: formationId,
-          trainee: d.traineeId,
-          status: 'validated',
-        }).lean();
-        if (!evaluation) continue;
 
         const traineeAff = await SessionAffectation.findOne({
           formation: formationId,
@@ -661,7 +834,27 @@ router.post(
           .lean();
         if (!traineeAff) continue;
 
-        const { totalNote, totalMax } = computeTotals(evaluation);
+        let totalNote = 0;
+        let totalMax = 0;
+
+        if (isDetailedLevel(formation.niveau)) {
+          const evaluation = await Evaluation.findOne({
+            session: sessionId,
+            formation: formationId,
+            trainee: d.traineeId,
+            status: 'validated',
+          }).lean();
+
+          if (!evaluation) continue;
+
+          const totals = computeTotals(evaluation, formation.niveau);
+          totalNote = totals.totalNote;
+          totalMax = totals.totalMax;
+        } else {
+          totalNote = 10;
+          totalMax = 10;
+        }
+
         const now = new Date();
 
         const updateSet = {
@@ -675,7 +868,6 @@ router.post(
           approvals: [],
         };
 
-        // ✅ si director saisit : on démarre le workflow
         if (isDirector && meId) {
           const approvals = [
             {
@@ -726,10 +918,6 @@ router.post(
 );
 
 /* ----------------- POST /approve ----------------- */
-/**
- * POST /api/final-decisions/approve
- * Body: { formation, traineeId }
- */
 router.post(
   '/approve',
   requireAuth,
@@ -749,7 +937,6 @@ router.post(
 
       const sessionId = f.session;
 
-      // je dois être director/trainer
       const myAffectation = await SessionAffectation.findOne({
         formation,
         user: meId,
@@ -759,7 +946,7 @@ router.post(
       if (!myAffectation) {
         return res.status(403).json({
           message:
-            "Vous devez faire partie de l’équipe de direction pour valider la décision finale.",
+            'Vous devez faire partie de l’équipe de direction pour valider la décision finale.',
         });
       }
 
@@ -770,12 +957,11 @@ router.post(
       });
 
       if (!finalDecision) {
-        return res
-          .status(404)
-          .json({ message: 'Décision finale introuvable pour ce stagiaire.' });
+        return res.status(404).json({
+          message: 'Décision finale introuvable pour ce stagiaire.',
+        });
       }
 
-      // s'assurer qu'il y a une affectation
       if (!finalDecision.affectation) {
         const traineeAff = await SessionAffectation.findOne({
           formation,
@@ -794,7 +980,6 @@ router.post(
         finalDecision.affectation = traineeAff._id;
       }
 
-      // add approval si pas déjà
       const already = (finalDecision.approvals || []).find(
         a => a.user.toString() === meId.toString()
       );
@@ -807,10 +992,8 @@ router.post(
         });
       }
 
-      // ✅ coreTeam validateurs
       const coreTeamUserIds = await getCoreTeamUserIds(formation);
 
-      // ✅ compute status
       const { status, allApproved } = computeStatusForApprovals(
         coreTeamUserIds,
         finalDecision.approvals
@@ -852,13 +1035,17 @@ router.get(
 
     try {
       const docs = await FinalDecision.find({ formation: formationId })
-        .select('trainee decision status approvals')
+        .select('trainee decision status approvals totalNote totalMax validatedBy validatedAt')
         .lean();
 
       const decisions = docs.map(fd => ({
         traineeId: String(fd.trainee),
         decision: fd.decision || null,
         status: fd.status,
+        totalNote: fd.totalNote != null ? Number(fd.totalNote) : null,
+        totalMax: fd.totalMax != null ? Number(fd.totalMax) : null,
+        validatedBy: fd.validatedBy ? String(fd.validatedBy) : null,
+        validatedAt: fd.validatedAt || null,
         approvals: (fd.approvals || []).map(ap => ({
           userId: String(ap.user),
           role: ap.role,
@@ -866,16 +1053,16 @@ router.get(
         })),
       }));
 
-      // statut global de la formation
       let formationStatus = 'draft';
       if (docs.length > 0) {
         if (docs.every(fd => fd.status === 'validated')) formationStatus = 'validated';
-        else if (docs.some(fd => fd.status === 'pending_team' || fd.status === 'validated'))
+        else if (docs.some(fd => fd.status === 'pending_team' || fd.status === 'validated')) {
           formationStatus = 'pending_team';
-        else formationStatus = 'draft';
+        } else {
+          formationStatus = 'draft';
+        }
       }
 
-      // équipe validateurs only (director/trainer)
       const teamAffects = await SessionAffectation.find({
         formation: formationId,
         role: { $in: ['director', 'trainer'] },
@@ -940,19 +1127,11 @@ router.get(
   }
 );
 
-/* ----------------- GET /formations/:formationId/report (PDF) -----------------
-   ✅ un seul endpoint: variant=full|light (full par défaut)
-   Exemple:
-   - /report
-   - /report?variant=light
-------------------------------------------------------------------- */
+/* ----------------- GET /formations/:formationId/report (PDF) ----------------- */
 router.get(
   '/formations/:formationId/report',
   requireAuth,
-  [
-    param('formationId').isMongoId(),
-    query('variant').optional().isIn(['full', 'light']),
-  ],
+  [param('formationId').isMongoId(), query('variant').optional().isIn(['full', 'light'])],
   async (req, res) => {
     const e = bad(req, res);
     if (e) return;
@@ -974,7 +1153,10 @@ router.get(
       const pdfBuffer = await generateFinalResultsPdf(data, { variant });
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(filename)}"`
+      );
 
       return res.end(pdfBuffer);
     } catch (err) {
@@ -984,7 +1166,7 @@ router.get(
   }
 );
 
-// GET /formations/:formationId/report-light (PDF LIGHT) ✅ garde l'endpoint existant
+/* ----------------- GET /formations/:formationId/report-light ----------------- */
 router.get(
   '/formations/:formationId/report-light',
   requireAuth,
@@ -1007,7 +1189,6 @@ router.get(
 
       const sessionPart = safe(data.session?.title || 'session');
       const formationPart = safe(data.formation?.nom || 'formation');
-
       const filename = `resultats_light_${sessionPart}_${formationPart}.pdf`;
 
       const pdfBuffer = await generateFinalResultsPdf(data, { variant: 'light' });
@@ -1025,6 +1206,7 @@ router.get(
     }
   }
 );
+
 router.get(
   '/sessions/:sessionId/report-by-region.zip',
   requireAuth,
@@ -1035,10 +1217,8 @@ router.get(
 
     try {
       const { sessionId } = req.params;
-
       const baseData = await buildSessionResultsReportData(sessionId);
 
-      // 1) group by region
       const byRegion = new Map();
       for (const t of baseData.trainees || []) {
         const region = String(t.region || 'UNKNOWN').trim() || 'UNKNOWN';
@@ -1046,7 +1226,6 @@ router.get(
         byRegion.get(region).push(t);
       }
 
-      // helpers
       function pad2(n) {
         const x = Number(n) || 0;
         return x < 10 ? `0${x}` : String(x);
@@ -1058,18 +1237,16 @@ router.get(
         return `leadership_${d.getFullYear()}_${pad2(d.getMonth() + 1)}`;
       }
 
-      // ✅ safe filename for entries inside ZIP (allow AR, remove bad header chars)
       function safe(s) {
         return String(s || '')
           .normalize('NFKD')
-          .replace(/[\r\n"]/g, '') // avoid header/file issues
+          .replace(/[\r\n"]/g, '')
           .replace(/[^\w\-ء-ي]+/g, '_')
           .replace(/_+/g, '_')
           .replace(/^_|_$/g, '')
           .slice(0, 80);
       }
 
-      // 2) headers ZIP (ASCII only => no ERR_INVALID_CHAR)
       const baseName = leadershipMonthFromStartDate(baseData.session?.startDate);
       const zipName = `${baseName}.zip`;
 
@@ -1091,7 +1268,6 @@ router.get(
 
       archive.pipe(res);
 
-      // 3) build PDFs
       const LEVELS = ['تمهيدية', 'شارة خشبية'];
       const isSuccess = t => t.decision === 'success';
       const isNonSuccess = t => t.decision !== 'success';
@@ -1099,7 +1275,6 @@ router.get(
       for (const [region, list] of byRegion.entries()) {
         const pages = [];
 
-        // 2 pages success
         for (const lvl of LEVELS) {
           pages.push({
             bucket: 'success',
@@ -1109,7 +1284,6 @@ router.get(
           });
         }
 
-        // 2 pages non-success
         for (const lvl of LEVELS) {
           pages.push({
             bucket: 'nonsuccess',
@@ -1138,10 +1312,8 @@ router.get(
 
         const out = await generatePdfFromTemplate(regionData, 'report_by_region.ejs');
 
-        // ✅ IMPORTANT: convert to real Buffer for archiver
         let pdfBuf = out;
         if (!Buffer.isBuffer(pdfBuf)) {
-          // Uint8Array / ArrayBuffer-like
           try {
             pdfBuf = Buffer.from(pdfBuf);
           } catch (convErr) {
@@ -1164,22 +1336,8 @@ router.get(
     }
   }
 );
+
 /* ----------------- POST /formations/:formationId/validate-region ----------------- */
-/**
- * Body:
- * {
- *   items: [
- *     { traineeId: "...", participated: true },
- *     { traineeId: "...", participated: false }
- *   ]
- * }
- *
- * Règle:
- * - si participated=true => upsert FinalDecision
- *   decision=success, status=validated, totalNote=10, totalMax=10, comment=''
- * - si participated=false => suppression éventuelle de la finalDecision existante
- * - blocage si aujourd'hui > endDate + 7 jours
- */
 router.post(
   '/formations/:formationId/validate-region',
   requireAuth,
@@ -1199,7 +1357,7 @@ router.post(
 
     try {
       const formation = await Formation.findById(formationId)
-        .select('_id session')
+        .select('_id session niveau')
         .populate({ path: 'session', select: 'endDate' })
         .lean();
 
@@ -1207,14 +1365,12 @@ router.post(
         return res.status(404).json({ message: 'Formation introuvable' });
       }
 
-      // ✅ moderator only
       if (!req.user || !(req.user.isModerator || req.user.role === 'moderator')) {
         return res.status(403).json({
           message: 'غير مسموح لك بالمصادقة على هذه الدورة',
         });
       }
 
-      // ✅ verrou J+7 basé sur la fin de session
       const endDate = formation.session?.endDate ? new Date(formation.session.endDate) : null;
       if (endDate && !Number.isNaN(endDate.getTime())) {
         const lockDate = new Date(endDate.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -1235,9 +1391,7 @@ router.post(
         .select('_id user formation isPresent')
         .lean();
 
-      const affectByUserId = new Map(
-        traineeAffects.map(a => [String(a.user), a])
-      );
+      const affectByUserId = new Map(traineeAffects.map(a => [String(a.user), a]));
 
       const affectationOps = [];
       const finalDecisionUpserts = [];
@@ -1248,7 +1402,6 @@ router.post(
         const aff = affectByUserId.get(traineeId);
         if (!aff) continue;
 
-        // checkbox -> affectation.isPresent
         affectationOps.push({
           updateOne: {
             filter: { _id: aff._id },
@@ -1303,11 +1456,18 @@ router.post(
         });
       }
 
+      const sessionId = formation.session?._id || formation.session;
+      const regionalState = await recomputeRegionalSessionValidation(sessionId, meId);
+
       return res.json({
         success: true,
         updatedPresence: affectationOps.length,
         upserted: finalDecisionUpserts.length,
         deleted: deleteTraineeIds.length,
+        sessionIsNowVisible: regionalState.isCompleted,
+        totalFormations: regionalState.totalFormations,
+        validatedFormations: regionalState.validatedFormations,
+        promotedUsers: regionalState.promotedUsers,
       });
     } catch (err) {
       console.error('POST /final-decisions/formations/:formationId/validate-region ERROR', err);
@@ -1315,7 +1475,6 @@ router.post(
     }
   }
 );
-
 
 router.get(
   '/formations/:formationId/report-region',
@@ -1341,7 +1500,6 @@ router.get(
       const formationPart = safe(data.formation?.nom || 'formation');
       const filename = `report_region_${sessionPart}_${formationPart}.pdf`;
 
-      // ✅ même logique que le PDF qui marche
       const pdfBuffer = await generatePdfFromTemplate(data, 'report_region.ejs');
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -1356,6 +1514,40 @@ router.get(
       return res.status(500).json({
         message: err.message || 'Erreur serveur lors de la génération du PDF régional.',
       });
+    }
+  }
+);
+
+router.get(
+  '/sessions/:sessionId/regional-validation',
+  requireAuth,
+  [param('sessionId').isMongoId()],
+  async (req, res) => {
+    const e = bad(req, res);
+    if (e) return;
+
+    try {
+      const { sessionId } = req.params;
+
+      const doc = await RegionalSessionValidation.findOne({ session: sessionId })
+        .populate('formations.formation', 'nom niveau')
+        .lean();
+
+      if (!doc) {
+        return res.json({
+          session: sessionId,
+          totalFormations: 0,
+          validatedFormations: 0,
+          isCompleted: false,
+          status: 'draft',
+          formations: [],
+        });
+      }
+
+      return res.json(doc);
+    } catch (err) {
+      console.error('GET /final-decisions/sessions/:sessionId/regional-validation ERROR', err);
+      return res.status(500).json({ message: 'Erreur serveur' });
     }
   }
 );

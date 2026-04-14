@@ -12,6 +12,7 @@ const MENU = [
   { label: 'مطلب تنظيم دورة تدريبية',   to: '/region/demandes', activeFor: ['/region/demandes','/region/demandes/new']  },
   { label: ' ادارة مطالب المشاركة',    to: '/region/gestionparticipants', activeFor: ['/region/gestionparticipants','/region/listeparticipants']   },
   { label: 'إدارة الدراسات التدريبية ',    to: '/region/gestionformations', activeFor: ['/region/gestionformations','/region/affectations','/region/formation_final']    },
+  { label: 'نتائج الدورات التدريبية',    to: '/region/resultats', activeFor: ['/region/resultats','/region/resultats/resultatformation']    },
 ];
 
 

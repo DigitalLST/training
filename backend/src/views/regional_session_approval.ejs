@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      font-family: "Amiri", serif;
+      direction: rtl;
+      text-align: right;
+      margin: 24px;
+      color: #111;
+      line-height: 1.9;
+    }
+
+    .header-logo {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .header-logo img {
+      width: 110px;
+    }
+
+    .header-top {
+      text-align: right;
+      font-size: 24px;
+      font-weight: bold;
+      color: #b91c1c;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .ref {
+      text-align: right;
+      font-size: 18px;
+      font-weight: bold;
+      color: #b91c1c;
+      margin-bottom: 8px;
+    }
+
+    .date-line {
+      text-align: left;
+      font-size: 16px;
+      margin-bottom: 20px;
+    }
+
+    .title {
+      text-align: center;
+      font-size: 34px;
+      font-weight: bold;
+      margin: 20px 0 30px 0;
+    }
+
+    .p {
+      font-size: 18px;
+      margin: 0 0 10px 0;
+      text-align: justify;
+    }
+
+    .decision-title {
+      text-align: center;
+      font-size: 28px;
+      font-weight: bold;
+      margin: 26px 0 18px 0;
+    }
+
+    .article {
+      font-size: 20px;
+      margin: 18px 0;
+      text-align: justify;
+    }
+
+    .signature-block {
+      margin-top: 60px;
+      width: 260px;
+      margin-right: auto;
+      margin-left: 0;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+
+    .signature-title {
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .signature-name {
+      font-size: 20px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .signature-img img {
+      width: 120px;
+      height: auto;
+    }
+
+    .footer-line {
+      margin-top: 50px;
+      height: 6px;
+      background: #c91414;
+      border-radius: 10px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-logo">
+    <% if (logoDataUrl) { %>
+      <img src="<%= logoDataUrl %>" />
+    <% } %>
+  </div>
+
+  <div class="header-top">
+    <div>الكشافة التونسية</div>
+    <div>اللجنة الوطنية لتنمية القيادات</div>
+  </div>
+
+  <div class="ref"><%= referenceNumber %></div>
+
+  <div class="date-line">تونس، في <%= issueDate %></div>
+
+  <div class="title">مــــــــــقـــــــرر</div>
+
+  <p class="p">إن رئيس اللجنة الوطنية لتنمية القيادات بمنظمة الكشافة التونسية؛</p>
+
+  <p class="p">
+    بعد اطلاعه على النظام الأساسي لمنظمة الكشافة التونسية، المصادق عليه خلال المؤتمر الوطني 24 المنعقد بسوسة أيام 06 و07 و08 و09 فيفري 2025،
+  </p>
+
+  <p class="p">
+    وعلى النظام الداخلي لمنظمة الكشافة التونسية المصادق عليه خلال الدورة الثانية للمجلس الأعلى بعد المؤتمر الوطني الرابع والعشرون،
+  </p>
+
+  <p class="p">
+    وعلى السياسة الوطنية لتنمية القيادات المصادق عليها خلال المؤتمر الوطني 24،
+  </p>
+
+  <p class="p">
+    وعلى أنظمة التأهيل القيادي بالكشافة التونسية وخاصة نظام تأهيل التدريب الأساسي الرسمي المنصوص عليهم بالسياسة الوطنية لتنمية القيادات،
+  </p>
+
+  <p class="p">
+    وعلى منشور القيادة العامة الصادر في 19 فيفري 2025،
+  </p>
+
+  <p class="p">
+    وعلى تسمية رئيس اللجنة الوطنية لتنمية القيادات،
+  </p>
+
+  <p class="p">
+    وبتكليف من القائد العام للكشافة التونسية،
+  </p>
+
+  <p class="p">
+    وعلى مراسلتكم حول طلب فتح <%= sessionTitle %> بجهة <%= region %>،
+  </p>
+
+  <div class="decision-title">قــــــــرّر ما يلي</div>
+
+  <p class="article">
+    الفصل عدد 1 : يرخص للجنة الجهوية لتنمية القيادات بــ<%= region %> بتنظيم <%= sessionTitle %> أيام <%= daysText %>.
+  </p>
+
+  <p class="article">
+    الفصل عدد 2 : يكلف القائد <%= directorName %> بقيادة <%= sessionTitle %> المذكورة بالفصل الأول من هذا المقرر.
+  </p>
+
+  <div class="signature-block">
+    <div class="signature-title">رئيس اللجنة الوطنية لتنمية القيادات</div>
+
+    <div class="signature-name">
+      <%= cnPresidentName || '—' %>
+    </div>
+
+    <% if (cnPresident && cnPresident.signatureDataUrl) { %>
+      <div class="signature-img">
+        <img src="<%= cnPresident.signatureDataUrl %>" alt="cn-president-signature" />
+      </div>
+    <% } %>
+  </div>
+
+  <div class="footer-line"></div>
+
+</body>
+</html>

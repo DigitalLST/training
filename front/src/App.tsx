@@ -60,6 +60,7 @@ import ListeParticipants from './region/screens/ListeParticpant';
 import GestionFormationRegion from './region/screens/GestionFormation'
 import GestionAffectationReg from './region/screens/GestionAffectations';
 import FormationFinalRegion from './region/screens/DecisionFormation';
+import ResultatSession from './region/screens/ResultatSession';
 
 export default function App() {
   return (
@@ -120,6 +121,7 @@ export default function App() {
         <Route path="gestionformations" element={<GestionFormationRegion />} />
         <Route path="affectations" element={<GestionAffectationReg />} />
         <Route path="formation_final" element={<FormationFinalRegion />} />
+        <Route path="resultats" element={<ResultatSession />} />
 
 
         </Route>

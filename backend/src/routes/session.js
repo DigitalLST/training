@@ -162,7 +162,7 @@ router.get('/:id', async (req, res, next) => {
     }
 
     const s = await Session.findById(id)
-      .select('title startDate endDate inscriptionStartDate inscriptionEndDate trainingLevels branche organizer')
+      .select('title startDate endDate inscriptionStartDate inscriptionEndDate trainingLevels branche organizer isVisible')
       .lean()
       .exec();
 
@@ -180,6 +180,7 @@ router.get('/:id', async (req, res, next) => {
       trainingLevels: Array.isArray(s.trainingLevels) ? s.trainingLevels : [],
       branche: Array.isArray(s.branche) ? s.branche : [],
       organizer: s.organizer || 'اللجنة الوطنية لتنمية القيادات',
+      isVisible: !!s.isVisible,
     });
   } catch (err) {
     next(err);

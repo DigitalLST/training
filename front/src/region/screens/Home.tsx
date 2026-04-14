@@ -5,6 +5,7 @@ const CARDS = [
   { label: 'مطلب تنظيم دورة تدريبية',   to: '/region/demandes'},
   { label: ' ادارة مطالب المشاركة',    to: '/region/gestionparticipants'},
   { label: 'إدارة الدراسات التدريبية ',    to: '/region/gestionformations' },
+  { label: 'نتائج الدورات التدريبية ',    to: '/region/resultats' },
 
 ];
 

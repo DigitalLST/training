@@ -15,11 +15,9 @@ type RegionRequestRow = {
 
   generatedSessionId?: string | null;
 
-  // dates viennent du modèle Session (via generatedSessionId)
   inscriptionStartDate?: string | null;
   inscriptionEndDate?: string | null;
 
-  // pour éviter le "flash" (on n'affiche pas le bloc tant que pas chargé)
   datesLoaded?: boolean;
 };
 
@@ -39,6 +37,9 @@ const LEVEL_LABEL: Record<string, string> = {
 const hasNationalLevel = (levels: string[]) =>
   levels.some((l) => l === 'تمهيدية' || l === 'شارة خشبية');
 
+const hasTamheediyaLevel = (levels: string[]) =>
+  levels.some((l) => l === 'تمهيدية');
+
 const isRegionalTrack = (levels: string[]) => {
   const lvl = (levels?.[0] || '').trim();
   return lvl === 'S1' || lvl === 'S2' || lvl === 'S3' || lvl === 'الدراسة الابتدائية';
@@ -57,6 +58,8 @@ export default function RegionRequests(): React.JSX.Element {
   const [rows, setRows] = useState<RegionRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   function authHeaders(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -95,9 +98,28 @@ export default function RegionRequests(): React.JSX.Element {
       fontWeight: 700,
       whiteSpace: 'nowrap',
     };
-    if (s === 'APPROVED') return { ...base, borderColor: '#16a34a33', background: '#16a34a14', color: '#166534' };
-    if (s === 'REJECTED') return { ...base, borderColor: '#dc262633', background: '#dc262614', color: '#7f1d1d' };
-    return { ...base, borderColor: '#f59e0b33', background: '#f59e0b14', color: '#92400e' };
+    if (s === 'APPROVED') {
+      return {
+        ...base,
+        borderColor: '#16a34a33',
+        background: '#16a34a14',
+        color: '#166534',
+      };
+    }
+    if (s === 'REJECTED') {
+      return {
+        ...base,
+        borderColor: '#dc262633',
+        background: '#dc262614',
+        color: '#7f1d1d',
+      };
+    }
+    return {
+      ...base,
+      borderColor: '#f59e0b33',
+      background: '#f59e0b14',
+      color: '#92400e',
+    };
   };
 
   const displayTitle = (r: RegionRequestRow) => {
@@ -125,9 +147,7 @@ export default function RegionRequests(): React.JSX.Element {
     return renderBadges(mapped);
   };
 
-  // ---- GET dates depuis le modèle Session ----
   async function fetchSessionDates(sessionId: string): Promise<{ start: string | null; end: string | null }> {
-    // ✅ adapte l'URL si ton endpoint diffère
     const res = await fetch(`${API_BASE}/sessions/${sessionId}?ts=${Date.now()}`, {
       headers: authHeaders(),
       cache: 'no-store',
@@ -136,12 +156,15 @@ export default function RegionRequests(): React.JSX.Element {
     const s = await res.json();
 
     return {
-      start: toDateInput(s.inscriptionStartDate ?? s.inscription_start_date ?? s.inscriptionStart ?? s.inscription_start),
-      end: toDateInput(s.inscriptionEndDate ?? s.inscription_end_date ?? s.inscriptionEnd ?? s.inscription_end),
+      start: toDateInput(
+        s.inscriptionStartDate ?? s.inscription_start_date ?? s.inscriptionStart ?? s.inscription_start
+      ),
+      end: toDateInput(
+        s.inscriptionEndDate ?? s.inscription_end_date ?? s.inscriptionEnd ?? s.inscription_end
+      ),
     };
   }
 
-  // ---- Save inscription dates (écrit dans Session via endpoint request) ----
   async function saveInscriptionDates(requestId: string, s: string, e: string) {
     const res = await fetch(`${API_BASE}/region-session-requests/${requestId}/inscription-dates`, {
       method: 'PATCH',
@@ -156,7 +179,40 @@ export default function RegionRequests(): React.JSX.Element {
     return res.json();
   }
 
-  // --- LISTE REQUESTS + enrichissement dates depuis Session ---
+  async function downloadApprovalPdf(requestId: string) {
+    try {
+      setDownloadingId(requestId);
+      setErr(null);
+
+      const res = await fetch(
+        `${API_BASE}/region-session-requests/${requestId}/approval-pdf?ts=${Date.now()}`,
+        {
+          method: 'GET',
+          headers: authHeaders(),
+          cache: 'no-store',
+        }
+      );
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `approval_${requestId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      setTimeout(() => window.URL.revokeObjectURL(url), 10_000);
+    } catch (e: any) {
+      setErr(e?.message || 'تعذر تحميل الرخصة');
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -203,19 +259,16 @@ export default function RegionRequests(): React.JSX.Element {
 
             generatedSessionId,
 
-            // par défaut: non chargé
             inscriptionStartDate: null,
             inscriptionEndDate: null,
             datesLoaded: false,
           };
         });
 
-        // tri newest first (best effort)
         mapped.sort((a, b) => (a.id < b.id ? 1 : -1));
 
         setRows(mapped);
 
-        // ✅ enrichissement: fetch dates pour demandes approuvées + track régional + session générée
         const targets = mapped.filter(
           (r) => r.status === 'APPROVED' && !!r.generatedSessionId && isRegionalTrack(r.trainingLevels)
         );
@@ -230,7 +283,10 @@ export default function RegionRequests(): React.JSX.Element {
         );
 
         const fulfilled = results
-          .filter((x): x is PromiseFulfilledResult<{ requestId: string; start: string | null; end: string | null }> => x.status === 'fulfilled')
+          .filter(
+            (x): x is PromiseFulfilledResult<{ requestId: string; start: string | null; end: string | null }> =>
+              x.status === 'fulfilled'
+          )
           .map((x) => x.value);
 
         setRows((prev) =>
@@ -247,7 +303,6 @@ export default function RegionRequests(): React.JSX.Element {
           })
         );
 
-        // si certains fetch échouent, on marque quand même datesLoaded=true pour éviter bloc bloqué
         const failedIds = results
           .filter((x) => x.status === 'rejected')
           .map((_, idx) => targets[idx]?.id)
@@ -303,15 +358,10 @@ export default function RegionRequests(): React.JSX.Element {
       <div style={{ display: 'grid', gap: 14 }}>
         {rows.map((row) => {
           const isNational = hasNationalLevel(row.trainingLevels);
+          const isTamheediya = hasTamheediyaLevel(row.trainingLevels);
 
           const hasDates = !!row.inscriptionStartDate && !!row.inscriptionEndDate;
 
-          // ✅ afficher le bloc uniquement si:
-          // - track régional
-          // - approuvé
-          // - session générée
-          // - dates chargées
-          // - dates pas encore définies
           const canSetInscription =
             !isNational &&
             isRegionalTrack(row.trainingLevels) &&
@@ -320,6 +370,11 @@ export default function RegionRequests(): React.JSX.Element {
             row.datesLoaded === true &&
             !hasDates;
 
+          const canDownloadApproval =
+            row.status === 'APPROVED' &&
+            !!row.generatedSessionId &&
+            !isTamheediya;
+
           return (
             <div key={row.id} style={styles.item} dir="rtl">
               <div style={styles.itemRight}>
@@ -327,7 +382,6 @@ export default function RegionRequests(): React.JSX.Element {
                   {displayTitle(row)} - {row.period}
                 </div>
 
-                {/* ✅ bloc saisie (une seule fois) */}
                 {canSetInscription && (
                   <InscriptionDatesInline
                     requestId={row.id}
@@ -337,7 +391,12 @@ export default function RegionRequests(): React.JSX.Element {
                       setRows((prev) =>
                         prev.map((x) =>
                           x.id === row.id
-                            ? { ...x, inscriptionStartDate: s, inscriptionEndDate: e, datesLoaded: true }
+                            ? {
+                                ...x,
+                                inscriptionStartDate: s,
+                                inscriptionEndDate: e,
+                                datesLoaded: true,
+                              }
                             : x
                         )
                       );
@@ -346,17 +405,15 @@ export default function RegionRequests(): React.JSX.Element {
                   />
                 )}
 
-                {/* ✅ si dates déjà définies -> affichage read-only */}
                 {!isNational && hasDates && (
                   <div style={styles.metaLine}>
                     <span style={styles.metaLabel}>فترة التسجيل:</span>
                     <span style={{ fontSize: 13, color: '#374151' }}>
-                     من {row.inscriptionStartDate}  الى {row.inscriptionEndDate}
+                      من {row.inscriptionStartDate} الى {row.inscriptionEndDate}
                     </span>
                   </div>
                 )}
 
-                {/* ✅ details */}
                 {isNational ? (
                   <div style={styles.metaBlock}>
                     <div style={styles.metaLine}>
@@ -372,12 +429,29 @@ export default function RegionRequests(): React.JSX.Element {
                   <div style={styles.metaBlock}>
                     <div style={styles.metaLine}>
                       <span style={styles.metaLabel}>القائد:</span>
-                      <span style={{ fontSize: 13, color: '#374151' }}>{row.directorName || '—'}</span>
+                      <span style={{ fontSize: 13, color: '#374151' }}>
+                        {row.directorName || '—'}
+                      </span>
                     </div>
                     <div style={styles.metaLine}>
                       <span style={styles.metaLabel}>عدد المشاركين:</span>
-                      <span style={{ fontSize: 13, color: '#374151' }}>{row.participantsCount ?? '—'}</span>
+                      <span style={{ fontSize: 13, color: '#374151' }}>
+                        {row.participantsCount ?? '—'}
+                      </span>
                     </div>
+                  </div>
+                )}
+
+                {canDownloadApproval && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => downloadApprovalPdf(row.id)}
+                      disabled={downloadingId === row.id}
+                      style={styles.downloadBtn}
+                    >
+                      {downloadingId === row.id ? '... تحميل' : 'تحميل الرخصة'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -393,7 +467,6 @@ export default function RegionRequests(): React.JSX.Element {
   );
 }
 
-/* ---------- Inline component: set inscription dates ---------- */
 function InscriptionDatesInline(props: {
   requestId: string;
   defaultStart: string;
@@ -410,7 +483,9 @@ function InscriptionDatesInline(props: {
     setErr(null);
 
     if (!s || !e) return setErr('تواريخ التسجيل إجبارية');
-    if (new Date(e) < new Date(s)) return setErr('تاريخ نهاية التسجيل يجب أن يكون بعد تاريخ بدايته');
+    if (new Date(e) < new Date(s)) {
+      return setErr('تاريخ نهاية التسجيل يجب أن يكون بعد تاريخ بدايته');
+    }
 
     try {
       setSaving(true);
@@ -428,11 +503,21 @@ function InscriptionDatesInline(props: {
       <div style={inlineStyles.inputs}>
         <div style={inlineStyles.field}>
           <span style={inlineStyles.label}>بداية التسجيل</span>
-          <input type="date" value={s} onChange={(ev) => setS(ev.target.value)} style={inlineStyles.input} />
+          <input
+            type="date"
+            value={s}
+            onChange={(ev) => setS(ev.target.value)}
+            style={inlineStyles.input}
+          />
         </div>
         <div style={inlineStyles.field}>
           <span style={inlineStyles.label}>نهاية التسجيل</span>
-          <input type="date" value={e} onChange={(ev) => setE(ev.target.value)} style={inlineStyles.input} />
+          <input
+            type="date"
+            value={e}
+            onChange={(ev) => setE(ev.target.value)}
+            style={inlineStyles.input}
+          />
         </div>
       </div>
 
@@ -473,7 +558,6 @@ const inlineStyles: Record<string, React.CSSProperties> = {
   err: { color: '#b91c1c', fontSize: 12 },
 };
 
-/* ---------- styles ---------- */
 const styles: Record<string, React.CSSProperties> = {
   toolbar: {
     display: 'flex',
@@ -484,7 +568,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 },
   pageTitle: { fontSize: 18, fontWeight: 800, color: '#1f2937', marginBottom: 100 },
-  redLine: { height: 3, background: RED, opacity: 0.9, borderRadius: 2, marginTop: 8, marginBottom: 8 },
+  redLine: {
+    height: 3,
+    background: RED,
+    opacity: 0.9,
+    borderRadius: 2,
+    marginTop: 8,
+    marginBottom: 8,
+  },
   squareRedBtn: {
     width: 46,
     height: 46,
@@ -537,9 +628,19 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   actions: { display: 'flex', gap: 18, color: '#0f172a', alignItems: 'center' },
+
+  downloadBtn: {
+    padding: '8px 14px',
+    borderRadius: 999,
+    border: `1px solid ${RED}`,
+    background: 'transparent',
+    color: RED,
+    cursor: 'pointer',
+    fontWeight: 800,
+    fontSize: 12,
+  },
 };
 
-/* ---------- icônes (SVG inline) ---------- */
 function PlusIcon() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24">
@@ -547,6 +648,7 @@ function PlusIcon() {
     </svg>
   );
 }
+
 function ArrowRightIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24">

@@ -5,6 +5,16 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 const RED = '#e20514';
 
+type RoleType =
+  | 'director'
+  | 'trainer'
+  | 'assistant'
+  | 'coach'
+  | 'director_reg'
+  | 'trainer_reg'
+  | 'assistant_reg'
+  | 'coach_reg';
+
 type CertifLite = {
   code?: string;
   date?: string;
@@ -19,7 +29,7 @@ type EvaluationItem = {
 
 type EvaluationApproval = {
   user: string;
-  role: 'director' | 'trainer' | 'assistant' | 'coach';
+  role: RoleType;
   approvedAt: string;
   signatureUrl?: string;
 };
@@ -54,11 +64,13 @@ type FinalDecisionFromApi = {
   traineeId: string;
   decision?: FinalDecisionApi | null;
   status: 'draft' | 'pending_team' | 'validated';
+  totalNote?: number | null;
+  totalMax?: number | null;
   approvals: {
     userId: string;
     prenom?: string;
     nom?: string;
-    role: 'director' | 'trainer' | 'assistant' | 'coach';
+    role: RoleType;
     approvedAt?: string | null;
     signatureUrl?: string;
   }[];
@@ -68,7 +80,7 @@ type TeamMember = {
   userId: string;
   prenom: string;
   nom: string;
-  role: 'director' | 'trainer' | 'assistant' | 'coach';
+  role: RoleType;
   hasApproved: boolean;
   lastApprovedAt?: string | null;
   signatureUrl?: string;
@@ -78,12 +90,13 @@ type StaffMember = {
   userId: string;
   prenom: string;
   nom: string;
-  role: 'director' | 'trainer' | 'assistant' | 'coach';
+  role: RoleType;
 };
 
 type FormationHeader = {
   _id: string;
   nom: string;
+  niveau?: string;
   centreTitle?: string;
   centreRegion?: string;
   sessionTitle?: string;
@@ -117,11 +130,11 @@ function labelForDecisionUI(d: FinalDecisionUI): string {
   return 'لا يناسب الدور';
 }
 
-function labelForRole(role: 'director' | 'trainer' | 'assistant' | 'coach'): string {
-  if (role === 'director') return 'قائد الدراسة';
-  if (role === 'trainer') return 'مساعد قائد الدراسة';
-  if (role === 'assistant') return 'مساعد قائد الدراسة';
-  if (role === 'coach') return 'المرشد الفني';
+function labelForRole(role: RoleType): string {
+  if (role === 'director' || role === 'director_reg') return 'قائد الدراسة';
+  if (role === 'trainer' || role === 'trainer_reg') return 'مساعد قائد الدراسة';
+  if (role === 'assistant' || role === 'assistant_reg') return 'مساعد قائد الدراسة';
+  if (role === 'coach' || role === 'coach_reg') return 'المرشد الفني';
   return role;
 }
 
@@ -140,11 +153,20 @@ function formatApprovalSentence(iso?: string | null): string {
   return `تمت المصادقة يوم ${dateStr} على الساعة ${timeStr}`;
 }
 
+function isDetailedLevel(level?: string): boolean {
+  const v = String(level || '').trim();
+  return v === 'تمهيدية' || v === 'شارة خشبية';
+}
+
 function computeTotals(ev: EvaluationLite | null | undefined) {
-  if (!ev || !Array.isArray(ev.items)) return { totalNote: 0, totalMax: 0, pct: 0 };
+  if (!ev || !Array.isArray(ev.items)) {
+    return { totalNote: 0, totalMax: 0, pct: 0 };
+  }
+
   const totalMax = ev.items.reduce((s, it) => s + (Number(it.maxnote) || 0), 0);
   const totalNote = ev.items.reduce((s, it) => s + (Number(it.note) || 0), 0);
   const pct = totalMax > 0 ? Math.round((totalNote / totalMax) * 1000) / 10 : 0;
+
   return { totalNote, totalMax, pct };
 }
 
@@ -161,9 +183,11 @@ export default function ModeratorFinalResults(): React.JSX.Element {
   const [decisionsByTrainee, setDecisionsByTrainee] = React.useState<
     Record<string, FinalDecisionUI | undefined>
   >({});
+  const [decisionTotalsByTrainee, setDecisionTotalsByTrainee] = React.useState<
+    Record<string, { totalNote?: number | null; totalMax?: number | null }>
+  >({});
   const [globalValidationDate, setGlobalValidationDate] = React.useState<string | null>(null);
 
-  // Staff complet depuis affectations (director / trainer / assistant / coach)
   const [staff, setStaff] = React.useState<StaffMember[]>([]);
 
   const [pdfLoading, setPdfLoading] = React.useState(false);
@@ -181,30 +205,28 @@ export default function ModeratorFinalResults(): React.JSX.Element {
         setLoading(true);
         setErr(null);
 
-        // 1) Méta formation
         try {
           const rF = await fetch(`${API_BASE}/formations/${formationId}?ts=${Date.now()}`, {
             headers: headers(),
             cache: 'no-store',
           });
+
           if (rF.ok) {
             const j = await rF.json();
             setHeader({
               _id: String(j._id),
               nom: j.nom || '',
+              niveau: j.niveau || '',
               centreTitle: j.centre?.title || '',
               centreRegion: j.centre?.region || '',
-              sessionTitle: j.sessionTitle || j.session?.title || '',
-              sessionStartDate: j.session?.startDate || j.sessionStartDate,
-              sessionEndDate: j.session?.endDate || j.sessionEndDate,
+              sessionTitle: j.sessionTitle || '',
+              sessionStartDate: j.startDate || null,
+              sessionEndDate: j.endDate || null,
               directorName: j.directorName || '',
             });
           }
-        } catch {
-          // ignore meta errors
-        }
+        } catch {}
 
-        // 2) Trainees + évaluations
         const rT = await fetch(
           `${API_BASE}/evaluations/formations/${formationId}/trainees?ts=${Date.now()}`,
           {
@@ -212,6 +234,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             cache: 'no-store',
           }
         );
+
         if (!rT.ok) throw new Error(`HTTP ${rT.status}`);
         const dataT = await rT.json();
 
@@ -220,6 +243,13 @@ export default function ModeratorFinalResults(): React.JSX.Element {
           isPresent: boolean;
           trainee: any;
           evaluation: EvaluationLite | null;
+          finalDecision?: {
+            _id: string;
+            decision?: FinalDecisionApi | null;
+            status: 'draft' | 'pending_team' | 'validated';
+            totalNote?: number | null;
+            totalMax?: number | null;
+          } | null;
         }[];
 
         const list: TraineeUser[] = rows
@@ -240,7 +270,17 @@ export default function ModeratorFinalResults(): React.JSX.Element {
 
         setTrainees(list);
 
-        // 3) Décisions finales + équipe direction (pour status + dates)
+        const fallbackTotals: Record<string, { totalNote?: number | null; totalMax?: number | null }> = {};
+        rows.forEach(a => {
+          if (a?.trainee?._id && a?.finalDecision) {
+            fallbackTotals[String(a.trainee._id)] = {
+              totalNote: a.finalDecision.totalNote ?? null,
+              totalMax: a.finalDecision.totalMax ?? null,
+            };
+          }
+        });
+        setDecisionTotalsByTrainee(fallbackTotals);
+
         const rDec = await fetch(
           `${API_BASE}/final-decisions/formations/${formationId}?ts=${Date.now()}`,
           {
@@ -248,18 +288,26 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             cache: 'no-store',
           }
         );
+
         if (rDec.ok) {
           const dataDec = await rDec.json();
           const decs = (dataDec.decisions || []) as FinalDecisionFromApi[];
           const teamArr = (dataDec.team || []) as TeamMember[];
 
           const byTrainee: Record<string, FinalDecisionUI | undefined> = {};
+          const totalsByTrainee: Record<string, { totalNote?: number | null; totalMax?: number | null }> = {};
+
           decs.forEach(fd => {
             byTrainee[fd.traineeId] = mapApiDecisionToUi(fd.decision || undefined);
+            totalsByTrainee[fd.traineeId] = {
+              totalNote: fd.totalNote ?? null,
+              totalMax: fd.totalMax ?? null,
+            };
           });
-          setDecisionsByTrainee(byTrainee);
 
-          // date globale = max(lastApprovedAt)
+          setDecisionsByTrainee(byTrainee);
+          setDecisionTotalsByTrainee(prev => ({ ...prev, ...totalsByTrainee }));
+
           const dates: Date[] = [];
           teamArr.forEach(m => {
             if (m.lastApprovedAt) {
@@ -267,13 +315,13 @@ export default function ModeratorFinalResults(): React.JSX.Element {
               if (!isNaN(d.getTime())) dates.push(d);
             }
           });
+
           if (dates.length) {
             const maxD = new Date(Math.max(...dates.map(d => d.getTime())));
             setGlobalValidationDate(maxD.toISOString());
           }
         }
 
-        // 4) Staff complet depuis affectations (director / trainer / assistant / coach)
         try {
           const rA = await fetch(
             `${API_BASE}/affectations/formations/${formationId}/affectations?ts=${Date.now()}`,
@@ -282,6 +330,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
               cache: 'no-store',
             }
           );
+
           if (rA.ok) {
             const dataA = await rA.json();
             const arr: any[] = Array.isArray(dataA) ? dataA : dataA.affectations || [];
@@ -292,14 +341,12 @@ export default function ModeratorFinalResults(): React.JSX.Element {
                 userId: String(a.user._id),
                 prenom: String(a.user.prenom || ''),
                 nom: String(a.user.nom || ''),
-                role: a.role as StaffMember['role'],
+                role: a.role as RoleType,
               }));
 
             setStaff(staffList);
           }
-        } catch {
-          // on ignore l'erreur de staff, ce n'est pas bloquant
-        }
+        } catch {}
       } catch (e: any) {
         setErr(e?.message || 'تعذّر تحميل النتائج النهائية');
       } finally {
@@ -308,18 +355,39 @@ export default function ModeratorFinalResults(): React.JSX.Element {
     })();
   }, [formationId]);
 
+  const detailed = isDetailedLevel(header?.niveau);
   const present = trainees.filter(t => t.isPresent);
-  const withValidatedEval = present.filter(t => t.evaluation?.status === 'validated');
 
-  const rowsWithTotals = withValidatedEval
-    .map(t => ({
-      trainee: t,
-      totals: computeTotals(t.evaluation),
-      decision: decisionsByTrainee[t._id],
-    }))
+  const rowsWithTotals = present
+    .filter(t => {
+      if (detailed) {
+        return t.evaluation?.status === 'validated';
+      }
+      const decision = decisionsByTrainee[t._id];
+      const totals = decisionTotalsByTrainee[t._id];
+      return !!decision && (Number(totals?.totalMax) || 0) > 0;
+    })
+    .map(t => {
+      if (detailed) {
+        return {
+          trainee: t,
+          totals: computeTotals(t.evaluation),
+          decision: decisionsByTrainee[t._id],
+        };
+      }
+
+      const totalNote = Number(decisionTotalsByTrainee[t._id]?.totalNote) || 0;
+      const totalMax = Number(decisionTotalsByTrainee[t._id]?.totalMax) || 0;
+      const pct = totalMax > 0 ? Math.round((totalNote / totalMax) * 1000) / 10 : 0;
+
+      return {
+        trainee: t,
+        totals: { totalNote, totalMax, pct },
+        decision: decisionsByTrainee[t._id],
+      };
+    })
     .sort((a, b) => b.totals.totalNote - a.totals.totalNote);
 
-  // Stats globales
   const totalPresent = present.length;
   const successCount = rowsWithTotals.filter(r => r.decision === 'pass').length;
   const retakeCount = rowsWithTotals.filter(r => r.decision === 'repeat').length;
@@ -333,6 +401,7 @@ export default function ModeratorFinalResults(): React.JSX.Element {
 
   async function handleDownloadPdf() {
     if (!formationId) return;
+
     try {
       setPdfLoading(true);
       setPdfErr(null);
@@ -340,11 +409,10 @@ export default function ModeratorFinalResults(): React.JSX.Element {
       const r = await fetch(
         `${API_BASE}/final-decisions/formations/${formationId}/report?ts=${Date.now()}`,
         {
-          headers: {
-            ...headers(),
-          },
+          headers: { ...headers() },
         }
       );
+
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
       const blob = await r.blob();
@@ -379,22 +447,16 @@ export default function ModeratorFinalResults(): React.JSX.Element {
     nav('/moderator/rapportcoach', { state: { formationId } });
   }
 
-  // Split staff
-  const directionStaff = staff.filter(s => s.role !== 'coach');
-  const coachStaff = staff.filter(s => s.role === 'coach');
+  const directionStaff = staff.filter(s => s.role !== 'coach' && s.role !== 'coach_reg');
+  const coachStaff = staff.filter(s => s.role === 'coach' || s.role === 'coach_reg');
 
   return (
     <div
       dir="rtl"
       style={{ width: '80vw', marginInline: 'auto', paddingInline: 24, marginTop: 20 }}
     >
-      {/* Toolbar + entête */}
       <div style={styles.toolbar}>
-        <button
-          onClick={() => nav(-1)}
-          style={styles.circleRedBtn}
-          aria-label="رجوع"
-        >
+        <button onClick={() => nav(-1)} style={styles.circleRedBtn} aria-label="رجوع">
           <ArrowRightIcon />
         </button>
 
@@ -406,12 +468,11 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             {header?.centreTitle || '—'}
             {header?.centreRegion ? ` (${header.centreRegion})` : ''}
           </div>
-          {header?.directorName && (
+          {header?.niveau && <div style={styles.headerSub}>المستوى : {header.niveau}</div>}
+          {detailed && header?.directorName && (
             <div style={styles.headerSub}>قائد الدراسة : {header.directorName}</div>
           )}
         </div>
-
-        {/* (logo si besoin) */}
       </div>
 
       <div style={styles.redLine} />
@@ -421,7 +482,6 @@ export default function ModeratorFinalResults(): React.JSX.Element {
 
       {!loading && !err && (
         <>
-          {/* Tableau figé des résultats */}
           <div style={{ overflowX: 'auto', marginTop: 10 }}>
             <table style={styles.table}>
               <thead>
@@ -430,10 +490,15 @@ export default function ModeratorFinalResults(): React.JSX.Element {
                   <th style={styles.th}>الاسم و اللقب</th>
                   <th style={styles.th}>الجهة</th>
                   <th style={styles.th}>البريد الإلكتروني</th>
-                  <th style={styles.th}>العلامة</th>
-                  <th style={styles.th}>النسبة %</th>
-                  <th style={styles.th}>القرار النهائي</th>
-                  <th style={styles.th}>التفاصيل</th>
+
+                  {detailed && (
+                    <>
+                      <th style={styles.th}>العلامة</th>
+                      <th style={styles.th}>النسبة %</th>
+                      <th style={styles.th}>القرار النهائي</th>
+                      <th style={styles.th}>التفاصيل</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -445,32 +510,37 @@ export default function ModeratorFinalResults(): React.JSX.Element {
                     </td>
                     <td style={styles.td}>{t.region || '—'}</td>
                     <td style={styles.td}>{t.email || '—'}</td>
-                    <td style={styles.td}>
-                      {totals.totalMax}/{totals.totalNote}
-                    </td>
-                    <td style={styles.td}>{totals.pct.toFixed(1)}%</td>
-                    <td style={styles.td}>
-                      {decision ? labelForDecisionUI(decision) : '—'}
-                    </td>
-                    <td style={styles.td}>
-                      <button
-                        style={styles.detailsBtn}
-                        onClick={() =>
-                          nav('/moderator/detailresults', {
-                            state: { formationId, traineeId: t._id, decision: decision },
-                          })
-                        }
-                      >
-                        التفاصيل
-                      </button>
-                    </td>
+
+                    {detailed && (
+                      <>
+                        <td style={styles.td}>
+                          {totals.totalMax}/{totals.totalNote}
+                        </td>
+                        <td style={styles.td}>{totals.pct.toFixed(1)}%</td>
+                        <td style={styles.td}>
+                          {decision ? labelForDecisionUI(decision) : '—'}
+                        </td>
+                        <td style={styles.td}>
+                          <button
+                            style={styles.detailsBtn}
+                            onClick={() =>
+                              nav('/moderator/detailresults', {
+                                state: { formationId, traineeId: t._id, decision },
+                              })
+                            }
+                          >
+                            التفاصيل
+                          </button>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
 
                 {rowsWithTotals.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={detailed ? 8 : 4}
                       style={{
                         ...styles.td,
                         textAlign: 'center',
@@ -485,21 +555,22 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             </table>
           </div>
 
-          {/* Statistiques globales */}
-          <div style={styles.statsRow}>
-            <div>عدد المتدربين : {totalPresent}</div>
-            <div> يؤهل : {successCount}</div>
-            <div> يعيد الدورة : {retakeCount}</div>
-            <div> لا يناسب الدور : {incompatibleCount}</div>
-            <div>نسبة النجاح : {successPct.toFixed(1)}%</div>
-          </div>
+          {detailed && (
+            <>
+              <div style={styles.statsRow}>
+                <div>عدد المتدربين : {totalPresent}</div>
+                <div> يؤهل : {successCount}</div>
+                <div> يعيد الدورة : {retakeCount}</div>
+                <div> لا يناسب الدور : {incompatibleCount}</div>
+                <div>نسبة النجاح : {successPct.toFixed(1)}%</div>
+              </div>
 
-          {/* Date unique de validation sous les indicateurs */}
-          {formattedValidationDate && (
-            <div style={styles.validationRow}>{formattedValidationDate}</div>
+              {formattedValidationDate && (
+                <div style={styles.validationRow}>{formattedValidationDate}</div>
+              )}
+            </>
           )}
 
-          {/* Staff : séparation قيادة الدراسة / المرشد الفني */}
           {(directionStaff.length > 0 || coachStaff.length > 0) && (
             <div style={styles.teamBlock}>
               {directionStaff.length > 0 && (
@@ -534,24 +605,25 @@ export default function ModeratorFinalResults(): React.JSX.Element {
             </div>
           )}
 
-          {/* Boutons en bas à gauche */}
-          <div style={styles.actionsRow}>
-            <button style={styles.reportBtn} onClick={handleDirectorReport}>
-              تقرير قائد الدراسة
-            </button>
-            <button style={styles.reportBtn} onClick={handleCoachReport}>
-              تقرير المرشد الفني
-            </button>
-            <button
-              style={styles.downloadBtn}
-              onClick={handleDownloadPdf}
-              disabled={pdfLoading}
-            >
-              {pdfLoading ? '… جارٍ توليد بطاقة النتائج' : 'تحميل بطاقة النتائج'}
-            </button>
-          </div>
+          {detailed && (
+            <div style={styles.actionsRow}>
+              <button style={styles.reportBtn} onClick={handleDirectorReport}>
+                تقرير قائد الدراسة
+              </button>
+              <button style={styles.reportBtn} onClick={handleCoachReport}>
+                تقرير المرشد الفني
+              </button>
+              <button
+                style={styles.downloadBtn}
+                onClick={handleDownloadPdf}
+                disabled={pdfLoading}
+              >
+                {pdfLoading ? '… جارٍ توليد بطاقة النتائج' : 'تحميل بطاقة النتائج'}
+              </button>
+            </div>
+          )}
 
-          {pdfErr && (
+          {detailed && pdfErr && (
             <div
               style={{
                 marginTop: 6,
@@ -568,8 +640,6 @@ export default function ModeratorFinalResults(): React.JSX.Element {
     </div>
   );
 }
-
-/* ------------------------ Styles & Icons ------------------------ */
 
 const styles: Record<string, React.CSSProperties> = {
   toolbar: {

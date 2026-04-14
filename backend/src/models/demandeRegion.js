@@ -14,8 +14,6 @@ const STATUSES = ["SUBMITTED", "APPROVED", "REJECTED"];
 
 const RegionSessionRequestSchema = new Schema(
   {
-    // Mongo already creates _id automatically
-
     region: {
       type: String,
       required: true,
@@ -30,9 +28,10 @@ const RegionSessionRequestSchema = new Schema(
       required: true,
       index: true
     },
-    startDate:   { type: Date,   required: true },
-    endDate:     { type: Date,   required: true },
-    // Keep it simple: optional, you decide when to fill it
+
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+
     branche: {
       type: [String],
       default: []
@@ -45,6 +44,14 @@ const RegionSessionRequestSchema = new Schema(
       maxlength: 180
     },
 
+    // ✅ NEW
+    location: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 180
+    },
+
     status: {
       type: String,
       enum: STATUSES,
@@ -52,7 +59,6 @@ const RegionSessionRequestSchema = new Schema(
       index: true
     },
 
-    // Director name (string) - optional (no special rules)
     director_name: {
       type: String,
       default: null,
@@ -62,7 +68,7 @@ const RegionSessionRequestSchema = new Schema(
 
     participants_count: {
       type: Number,
-      default:null,
+      default: null,
       min: 1
     },
 
@@ -73,7 +79,6 @@ const RegionSessionRequestSchema = new Schema(
       index: true
     },
 
-    // Link to created Session after approval (optional)
     generated_session_id: {
       type: Schema.Types.ObjectId,
       ref: "Session",
@@ -86,8 +91,7 @@ const RegionSessionRequestSchema = new Schema(
   }
 );
 
-// Useful indexes for your list screens
 RegionSessionRequestSchema.index({ region: 1, status: 1, created_at: -1 });
-RegionSessionRequestSchema.index({ training_level: 1, status: 1, created_at: -1 });
+RegionSessionRequestSchema.index({ training_levels: 1, status: 1, created_at: -1 });
 
 module.exports = mongoose.model("RegionSessionRequest", RegionSessionRequestSchema);

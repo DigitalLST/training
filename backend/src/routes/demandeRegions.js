@@ -1,10 +1,10 @@
-// routes/regionSessionRequests.routes.js
 const express = require("express");
 const router = express.Router();
 
 const RegionSessionRequest = require("../models/demandeRegion");
 const requireAuth = require("../middlewares/auth");
 const Session = require("../models/session");
+const User = require("../models/user");
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime());
 
@@ -26,23 +26,24 @@ const LEVEL_TITLE = {
   S3: "دراسة الاختصاص في امن و سلامة المخيمات S3",
   "الدراسة الابتدائية": "الدراسة الابتدائية",
 };
+const {
+  generatePdfFromTemplate,
+  buildRegionSessionApprovalTemplateData,
+} = require("../services/pdf.js");
 
 function buildSessionTitle(reqDoc, levels) {
-  // NATIONAL => keep the request name (custom)
-  const isNational = levels.some(l => NATIONAL_LEVELS.has(l));
+  const isNational = levels.some((l) => NATIONAL_LEVELS.has(l));
   if (isNational) return reqDoc.name;
 
-  // REGIONAL => always 1 level
   const lvl = levels[0];
   return LEVEL_TITLE[lvl] || reqDoc.name;
 }
 
-
 /* -------------------- CREATE REQUEST -------------------- */
 /**
  * POST /api/region-session-requests
- * Body (national): { name, training_levels: ["تمهيدية","شارة خشبية"] (1 or 2), startDate, endDate, branche:[...] }
- * Body (regional): { name, training_levels: ["S1"], startDate, endDate, director_name, participants_count }
+ * Body (national): { name, location, training_levels: ["تمهيدية"], startDate, endDate, branche:[...] }
+ * Body (regional): { name, location, training_levels: ["S1"], startDate, endDate, director_name, participants_count }
  */
 router.post("/", requireAuth, async (req, res) => {
   try {
@@ -55,6 +56,7 @@ router.post("/", requireAuth, async (req, res) => {
 
     const {
       name,
+      location,
       training_levels,
       startDate,
       endDate,
@@ -64,6 +66,8 @@ router.post("/", requireAuth, async (req, res) => {
     } = req.body || {};
 
     const nm = norm(name);
+    const loc = norm(location);
+
     if (!nm) {
       return res.status(400).json({ error: "name is required" });
     }
@@ -111,6 +115,7 @@ router.post("/", requireAuth, async (req, res) => {
       startDate: sd,
       endDate: ed,
       name: nm,
+      location: loc || null,
       status: "SUBMITTED",
       created_by_user_id: userId,
       generated_session_id: null,
@@ -227,7 +232,7 @@ router.get("/", requireAuth, async (req, res) => {
   }
 });
 
-/* -------------------- MODERATOR LIST (MUST BE BEFORE "/:id") -------------------- */
+/* -------------------- MODERATOR LIST -------------------- */
 /**
  * GET /api/region-session-requests/moderator
  */
@@ -280,17 +285,6 @@ router.get("/:id", requireAuth, async (req, res) => {
 /* -------------------- DECISION -------------------- */
 /**
  * PATCH /api/region-session-requests/:id/decision
- * Body: { decision: "APPROVED"|"REJECTED", inscriptionStartDate?, inscriptionEndDate? }
- *
- * Rules:
- * - Only moderator/admin/national
- * - If REJECTED => update request only
- * - If APPROVED => create Session + set generated_session_id
- * - For NATIONAL: require inscription dates from body AND require branche in request
- * - For REGIONAL: auto inscription dates:
- *    inscriptionStartDate = validation date + 1 day
- *    inscriptionEndDate = session.startDate - 7 days (but not before inscriptionStartDate)
- * - For REGIONAL: branche always ALL_BRANCHES
  */
 router.patch("/:id/decision", requireAuth, async (req, res) => {
   try {
@@ -312,13 +306,12 @@ router.patch("/:id/decision", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Only SUBMITTED requests can be decided" });
     }
 
-    // normalize levels from DB
     const levels = Array.isArray(reqDoc.training_levels)
       ? reqDoc.training_levels.map(norm).filter(Boolean)
       : reqDoc.training_level
         ? [norm(reqDoc.training_level)]
         : [];
-    const title = buildSessionTitle(reqDoc, levels);    
+    const title = buildSessionTitle(reqDoc, levels);
 
     const isNational = levels.some((l) => NATIONAL_LEVELS.has(l));
     const isRegional = levels.length === 1 && REGIONAL_LEVELS.has(levels[0]);
@@ -327,21 +320,18 @@ router.patch("/:id/decision", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid request levels" });
     }
 
-    // REJECT
     if (decision === "REJECTED") {
       reqDoc.status = "REJECTED";
       await reqDoc.save();
       return res.status(200).json({ ok: true, request: reqDoc.toObject() });
     }
 
-    // APPROVED — prevent double creation
     if (reqDoc.generated_session_id) {
       reqDoc.status = "APPROVED";
       await reqDoc.save();
       return res.status(200).json({ ok: true, request: reqDoc.toObject() });
     }
 
-    // inscription dates
     let insStart;
     let insEnd;
 
@@ -362,7 +352,6 @@ router.patch("/:id/decision", requireAuth, async (req, res) => {
         return res.status(400).json({ error: "inscriptionEndDate must be >= inscriptionStartDate" });
       }
     } else {
-      // REGIONAL auto rules
       const now = new Date();
       insStart = new Date(now);
       insStart.setDate(insStart.getDate() + 1);
@@ -375,39 +364,30 @@ router.patch("/:id/decision", requireAuth, async (req, res) => {
         return res.status(400).json({ error: "Invalid computed inscription dates" });
       }
 
-      // guard: end cannot be before start
       if (insEnd < insStart) {
         insEnd = new Date(insStart);
       }
     }
 
-    // branche (IMPORTANT FIX)
     let branche = [];
 
     if (isNational) {
       branche = Array.isArray(reqDoc.branche) ? reqDoc.branche.map(norm).filter(Boolean) : [];
       if (branche.length === 0) {
-        // ✅ clear message instead of mongoose 500
         return res.status(400).json({ error: "branche is required for NATIONAL session creation" });
       }
     } else {
       branche = ALL_BRANCHES;
     }
 
-    // Build Session payload (match your Session model fields)
     const sessionPayload = {
       title,
       startDate: reqDoc.startDate,
       endDate: reqDoc.endDate,
-
       organizer: norm(reqDoc.region),
-
-      // ✅ keep for all sessions (national + regional)
       trainingLevels: levels,
-
-      // ✅ your current Session schema expects "branche"
       branche,
-
+      location: norm(reqDoc.location),
       inscriptionStartDate: insStart,
       inscriptionEndDate: insEnd,
     };
@@ -425,7 +405,7 @@ router.patch("/:id/decision", requireAuth, async (req, res) => {
   }
 });
 
-/* -------------------- INSCRIPTION DATES OVERRIDE (optional) -------------------- */
+/* -------------------- INSCRIPTION DATES OVERRIDE -------------------- */
 /**
  * PATCH /api/region-session-requests/:id/inscription-dates
  */
@@ -487,5 +467,116 @@ router.patch("/:id/inscription-dates", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+/**
+ * GET /api/region-session-requests/:id/approval-pdf
+ * Télécharge le PDF du مقرر après validation nationale
+ */
+/**
+ * GET /api/region-session-requests/:id/approval-pdf
+ * Télécharge le PDF du مقرر après validation nationale
+ */
+router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
+  try {
+    const requestId = String(req.params.id || "").trim();
 
+    if (!requestId) {
+      return res.status(400).json({ error: "Missing id" });
+    }
+
+    const regionFromUser = norm(req.user?.region);
+    const isAdmin = !!req.user?.isAdmin;
+    const isModerator = !!req.user?.isModerator;
+    const isNational = !!req.user?.isNational;
+
+    const reqDoc = await RegionSessionRequest.findById(requestId).lean();
+    if (!reqDoc) {
+      return res.status(404).json({ error: "Request not found" });
+    }
+
+    // permissions
+    if (!(isAdmin || isModerator || isNational)) {
+      if (!regionFromUser) {
+        return res.status(400).json({ error: "User has no region set" });
+      }
+
+      if (norm(reqDoc.region) !== regionFromUser) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    // only approved
+    if (reqDoc.status !== "APPROVED") {
+      return res.status(400).json({
+        error: "PDF available only after approval",
+      });
+    }
+
+    if (!reqDoc.generated_session_id) {
+      return res.status(400).json({
+        error: "No generated session linked to this request",
+      });
+    }
+
+    // session
+    const sessionDoc = await Session.findById(reqDoc.generated_session_id)
+      .select("title trainingLevels startDate endDate organizer location")
+      .lean();
+
+    if (!sessionDoc) {
+      return res.status(404).json({
+        error: "Generated session not found",
+      });
+    }
+
+    // logo
+    let logoDataUrl = null;
+    try {
+      const logoAbs = path.join(__dirname, "..", "public", "fonts", "logo.png");
+      const logoBuf = fs.readFileSync(logoAbs);
+      logoDataUrl = "data:image/png;base64," + logoBuf.toString("base64");
+    } catch (e) {}
+
+    // CN President
+    const cnPresident = await User.findOne({
+      isNational: true,
+      role: "cn_president",
+    })
+      .select("prenom nom signatureUrl")
+      .lean();
+
+    const pdfData = buildRegionSessionApprovalTemplateData({
+      reqDoc,
+      sessionDoc,
+      cnPresident,
+      logoDataUrl,
+      referenceNumber: "761/103",
+    });
+
+    const pdfBuffer = await generatePdfFromTemplate(
+      pdfData,
+      "region_session_approval.ejs"
+    );
+
+    const asciiFilename = `decision_${requestId}.pdf`;
+    const utf8Filename = `decision_${String(
+      reqDoc.region || "region"
+    ).trim()}_${requestId}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(
+        utf8Filename
+      )}`
+    );
+
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error(
+      "GET /api/region-session-requests/:id/approval-pdf error:",
+      err
+    );
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 module.exports = router;

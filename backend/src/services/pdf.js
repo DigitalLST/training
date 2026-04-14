@@ -12,6 +12,7 @@ function labelDecision(decision) {
   if (decision === 'incompatible') return 'لا يناسب الدور';
   return '—';
 }
+
 function roleLabelRegion(role) {
   if (role === 'director_reg') return 'قائد الدراسة';
   if (role === 'trainer_reg') return 'مساعد قائد الدراسة';
@@ -79,6 +80,93 @@ function readSignatureDataUrl(signatureUrl) {
   }
 }
 
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatDateTunisia(dateInput) {
+  const d = new Date(dateInput);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+}
+
+function arabicMonthName(month) {
+  const months = {
+    1: 'جانفي',
+    2: 'فيفري',
+    3: 'مارس',
+    4: 'أفريل',
+    5: 'ماي',
+    6: 'جوان',
+    7: 'جويلية',
+    8: 'أوت',
+    9: 'سبتمبر',
+    10: 'أكتوبر',
+    11: 'نوفمبر',
+    12: 'ديسمبر',
+  };
+  return months[month] || '';
+}
+
+function buildArabicDaysText(startDate, endDate) {
+  const sd = new Date(startDate);
+  const ed = new Date(endDate);
+
+  if (Number.isNaN(sd.getTime()) || Number.isNaN(ed.getTime())) {
+    return '—';
+  }
+
+  const sameMonth =
+    sd.getFullYear() === ed.getFullYear() &&
+    sd.getMonth() === ed.getMonth();
+
+  if (sameMonth) {
+    const days = [];
+    const cur = new Date(sd);
+
+    while (cur <= ed) {
+      days.push(cur.getDate());
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    return `${days.join(' و ')} ${arabicMonthName(sd.getMonth() + 1)} ${sd.getFullYear()}`;
+  }
+
+  return `من ${sd.getDate()} ${arabicMonthName(sd.getMonth() + 1)} ${sd.getFullYear()} إلى ${ed.getDate()} ${arabicMonthName(ed.getMonth() + 1)} ${ed.getFullYear()}`;
+}
+
+function buildRegionSessionApprovalTemplateData({
+  reqDoc,
+  sessionDoc,
+  cnPresident,
+  logoDataUrl = null,
+  referenceNumber = '761/103',
+}) {
+  const cnPresidentName = cnPresident
+    ? `${cnPresident.prenom || ''} ${cnPresident.nom || ''}`.trim()
+    : '';
+
+  return {
+    logoDataUrl,
+    referenceNumber,
+    issueDate: formatDateTunisia(new Date()),
+    region: reqDoc?.region || '',
+    sessionTitle: sessionDoc?.title || reqDoc?.name || 'الدورة',
+    daysText: buildArabicDaysText(sessionDoc?.startDate, sessionDoc?.endDate),
+    directorName: reqDoc?.director_name || '—',
+    cnPresidentName,
+    cnPresident: cnPresident
+      ? {
+          ...cnPresident,
+          signatureDataUrl:
+            cnPresident.signatureDataUrl ||
+            readSignatureDataUrl(cnPresident.signatureUrl) ||
+            null,
+        }
+      : null,
+  };
+}
+
 /**
  * Détecte si on est sur Render/Prod
  * (tu peux ajouter d'autres flags si besoin)
@@ -97,7 +185,6 @@ function isProdLike() {
  * + fallback local si jamais chromium.executablePath() échoue
  */
 async function launchBrowser() {
-  // Sur Render / prod : on utilise Sparticuz
   if (isProdLike()) {
     const executablePath = await chromium.executablePath();
     return puppeteer.launch({
@@ -109,8 +196,6 @@ async function launchBrowser() {
     });
   }
 
-  // Local : Sparticuz marche aussi, mais parfois tu préfères un Chrome installé.
-  // On tente Sparticuz d'abord, puis fallback sans executablePath (si tu as un Chrome local détectable).
   try {
     const executablePath = await chromium.executablePath();
     return puppeteer.launch({
@@ -148,14 +233,10 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
 
   const data = JSON.parse(JSON.stringify(rawData || {}));
 
-  // ✅ light: on neutralise ce qui ne doit pas apparaître
   if (variant === 'light') {
     data.coachReport = null;
-    // data.cnPresident = null;
-    // data.cnCommissioner = null;
   }
 
-  // --------- Enrichissement des données pour le template ---------
   const session = data.session || {};
   const formation = data.formation || {};
   const director = data.director || null;
@@ -178,7 +259,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
 
   data.directorName = director ? `${director.prenom || ''} ${director.nom || ''}`.trim() : '';
 
-  // 🔹 Logo => data URL base64
   let logoDataUrl = null;
   try {
     const logoAbs = path.join(__dirname, '..', 'public', 'fonts', 'logo.png');
@@ -189,7 +269,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
   }
   data.logoDataUrl = logoDataUrl;
 
-  // 🔹 Team : rôle + signature en base64
   (data.team || []).forEach(m => {
     if (m.role === 'director') m.roleLabel = 'قائد الدراسة';
     else if (m.role === 'trainer') m.roleLabel = 'مساعد قائد الدراسة';
@@ -214,7 +293,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     }
   });
 
-  // 🔹 Réinjecter nom / prénom / signature dans le rapport directeur & coach
   const directorMember = (data.team || []).find(m => m.role === 'director');
   const coachMember = (data.team || []).find(m => m.role === 'coach');
 
@@ -234,7 +312,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     data.coachReport = null;
   }
 
-  // 🔹 Trainees : labels + lignes détaillées (groupées par famille)
   (data.trainees || []).forEach(t => {
     t.decisionLabel = labelDecision(t.decision);
     t.pct = t.pct || 0;
@@ -266,7 +343,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     t.evaluationGroups = groups;
   });
 
-  // 🔹 Phrase de validation globale
   if (data.stats && data.stats.validationDate) {
     const d = new Date(data.stats.validationDate);
     const dateStr = d.toLocaleDateString('ar-TN', {
@@ -283,7 +359,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     data.validationSentence = '';
   }
 
-  // 🔹 Rapports directeur / coach
   if (data.directorReport) {
     const fullName = `${data.directorReport.prenom || ''} ${data.directorReport.nom || ''}`.trim();
     data.directorReport.fullName = fullName || data.directorName || '';
@@ -298,7 +373,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     data.coachReport.signedAtText = dt ? dt.full : null;
   }
 
-  // Trier résultats finaux par région (puis nom/prenom pour stabilité)
   const regionRank = r => (r == null ? 'ZZZ' : String(r).trim() || 'ZZZ');
 
   data.trainees = (data.trainees || []).slice().sort((a, b) => {
@@ -317,7 +391,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     });
   });
 
-  // ✅ CN president/commissioner (date + signature base64)
   if (data.cnPresident) {
     data.cnPresident.validatedAtText = toDateStrAr(data.cnPresident.validatedAt);
     data.cnPresident.signatureDataUrl = readSignatureDataUrl(data.cnPresident.signatureUrl);
@@ -327,7 +400,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     data.cnCommissioner.signatureDataUrl = readSignatureDataUrl(data.cnCommissioner.signatureUrl);
   }
 
-  // --------- Render HTML ---------
   const html = await ejs.renderFile(templatePath, data, { async: true });
   console.log('HTML LENGTH:', html.length);
 
@@ -335,8 +407,6 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
 
   try {
     const page = await browser.newPage();
-
-    // Important: attends le chargement (fonts/images base64 ok)
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
     const pdfBuffer = await page.pdf({
@@ -351,70 +421,83 @@ async function generateFinalResultsPdf(rawData, opts = {}) {
     await browser.close();
   }
 }
+
 async function generatePdfFromTemplate(rawData, templateFile) {
   const templatePath = path.join(__dirname, '..', 'views', templateFile);
 
   const data = JSON.parse(JSON.stringify(rawData || {}));
 
-  // ---- Reprend l’enrichissement “commun” (copie de ce que tu fais déjà) ----
   const session = data.session || {};
   const formation = data.formation || {};
   const director = data.director || null;
 
-  data.sessionTitle = session.title || 'الدورة';
-  data.formationTitle = formation.nom || '';
-  data.centreLine = `${formation.centreTitle || ''}${
+  data.sessionTitle = data.sessionTitle || session.title || 'الدورة';
+  data.formationTitle = data.formationTitle || formation.nom || '';
+  data.centreLine = data.centreLine || `${formation.centreTitle || ''}${
     formation.centreRegion ? ' - ' + formation.centreRegion : ''
   }`;
 
-  if (session.startDate || session.endDate) {
-    const startStr = session.startDate ? new Date(session.startDate).toLocaleDateString('ar-TN') : '';
-    const endStr = session.endDate ? new Date(session.endDate).toLocaleDateString('ar-TN') : '';
-    data.periodLine = `من ${startStr} إلى ${endStr}`;
-  } else {
-    data.periodLine = '';
+  if (!data.periodLine) {
+    if (session.startDate || session.endDate) {
+      const startStr = session.startDate ? new Date(session.startDate).toLocaleDateString('ar-TN') : '';
+      const endStr = session.endDate ? new Date(session.endDate).toLocaleDateString('ar-TN') : '';
+      data.periodLine = `من ${startStr} إلى ${endStr}`;
+    } else {
+      data.periodLine = '';
+    }
   }
 
-  data.directorName = director ? `${director.prenom || ''} ${director.nom || ''}`.trim() : '';
+  data.directorName =
+    data.directorName || (director ? `${director.prenom || ''} ${director.nom || ''}`.trim() : '');
 
-  // logo
-  let logoDataUrl = null;
-  try {
-    const logoAbs = path.join(__dirname, '..', 'public', 'fonts', 'logo.png');
-    const logoBuf = fs.readFileSync(logoAbs);
-    logoDataUrl = 'data:image/png;base64,' + logoBuf.toString('base64');
-  } catch (err) {}
+  let logoDataUrl = data.logoDataUrl || null;
+  if (!logoDataUrl) {
+    try {
+      const logoAbs = path.join(__dirname, '..', 'public', 'fonts', 'logo.png');
+      const logoBuf = fs.readFileSync(logoAbs);
+      logoDataUrl = 'data:image/png;base64,' + logoBuf.toString('base64');
+    } catch (err) {
+      logoDataUrl = null;
+    }
+  }
   data.logoDataUrl = logoDataUrl;
 
-  // team roleLabel + signatures
   (data.team || []).forEach(m => {
     if (m.role === 'director') m.roleLabel = 'قائد الدراسة';
     else if (m.role === 'trainer') m.roleLabel = 'مساعد قائد الدراسة';
     else if (m.role === 'assistant') m.roleLabel = 'مساعد قائد الدراسة';
     else if (m.role === 'coach') m.roleLabel = 'المرشد الفني';
-    else m.roleLabel = m.role || '';
+    else if (['director_reg', 'trainer_reg', 'assistant_reg', 'coach_reg'].includes(m.role)) {
+      m.roleLabel = roleLabelRegion(m.role);
+    } else {
+      m.roleLabel = m.role || '';
+    }
 
     if (m.lastApprovedAt) {
       const d = new Date(m.lastApprovedAt);
-      m.lastApprovedAtText = d.toLocaleDateString('ar-TN', { year:'numeric', month:'2-digit', day:'2-digit' });
+      m.lastApprovedAtText = d.toLocaleDateString('ar-TN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
     } else {
       m.lastApprovedAtText = '';
     }
 
-    m.signatureDataUrl = m.signatureUrl ? readSignatureDataUrl(m.signatureUrl) : null;
+    m.signatureDataUrl = m.signatureDataUrl || (m.signatureUrl ? readSignatureDataUrl(m.signatureUrl) : null);
   });
 
-  // CN signatures (comme chez toi)
   if (data.cnPresident) {
     data.cnPresident.validatedAtText = toDateStrAr(data.cnPresident.validatedAt);
-    data.cnPresident.signatureDataUrl = readSignatureDataUrl(data.cnPresident.signatureUrl);
+    data.cnPresident.signatureDataUrl =
+      data.cnPresident.signatureDataUrl || readSignatureDataUrl(data.cnPresident.signatureUrl);
   }
   if (data.cnCommissioner) {
     data.cnCommissioner.validatedAtText = toDateStrAr(data.cnCommissioner.validatedAt);
-    data.cnCommissioner.signatureDataUrl = readSignatureDataUrl(data.cnCommissioner.signatureUrl);
+    data.cnCommissioner.signatureDataUrl =
+      data.cnCommissioner.signatureDataUrl || readSignatureDataUrl(data.cnCommissioner.signatureUrl);
   }
 
-  // ---- Render / PDF ----
   const html = await ejs.renderFile(templatePath, data, { async: true });
 
   const browser = await launchBrowser();
@@ -432,22 +515,20 @@ async function generatePdfFromTemplate(rawData, templateFile) {
     await browser.close();
   }
 }
+
 async function generateRegionResultsPdf(rawData) {
   const templatePath = path.join(__dirname, '..', 'views', 'report_region.ejs');
   const data = JSON.parse(JSON.stringify(rawData || {}));
 
-  // session / formation
   data.sessionTitle = data.sessionTitle || data.session?.title || 'الدورة';
   data.formationTitle = data.formationTitle || data.formation?.nom || '';
 
-  // centre
   if (!data.centreLine) {
     const centreTitle = data.formation?.centreTitle || data.formation?.centre?.title || '';
     const centreRegion = data.formation?.centreRegion || data.formation?.centre?.region || '';
     data.centreLine = `${centreTitle}${centreRegion ? ' - ' + centreRegion : ''}`;
   }
 
-  // période
   if (!data.periodLine) {
     const startDate = data.session?.startDate || null;
     const endDate = data.session?.endDate || null;
@@ -460,7 +541,6 @@ async function generateRegionResultsPdf(rawData) {
     else data.periodLine = '';
   }
 
-  // logo
   if (!data.logoDataUrl) {
     try {
       const logoAbs = path.join(__dirname, '..', 'public', 'fonts', 'logo.png');
@@ -471,13 +551,11 @@ async function generateRegionResultsPdf(rawData) {
     }
   }
 
-  // team regional labels
   data.team = (data.team || []).map(m => ({
     ...m,
     roleLabel: m.roleLabel || roleLabelRegion(m.role),
   }));
 
-  // sécurisation trainees
   data.trainees = (data.trainees || []).map(t => ({
     idScout: t.idScout || '',
     prenom: t.prenom || '',
@@ -505,4 +583,9 @@ async function generateRegionResultsPdf(rawData) {
   }
 }
 
-module.exports = { generateFinalResultsPdf, generatePdfFromTemplate,generateRegionResultsPdf };
+module.exports = {
+  generateFinalResultsPdf,
+  generatePdfFromTemplate,
+  generateRegionResultsPdf,
+  buildRegionSessionApprovalTemplateData,
+};
