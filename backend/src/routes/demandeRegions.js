@@ -554,7 +554,7 @@ router.get("/:id/approval-pdf", requireAuth, async (req, res) => {
 
     const pdfBuffer = await generatePdfFromTemplate(
       pdfData,
-      "region_session_approval.ejs"
+      "regional_session_approval.ejs"
     );
 
     const asciiFilename = `decision_${requestId}.pdf`;
