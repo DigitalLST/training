@@ -206,19 +206,27 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const regionFromUser = norm(req.user?.region);
     const isAdmin = !!req.user?.isAdmin;
-    const isModerator = !!req.user?.isModerator;
     const isNational = !!req.user?.isNational;
 
     const qStatus = norm(req.query?.status);
     const qRegion = norm(req.query?.region);
 
     const filter = {};
-    if (qStatus) filter.status = qStatus;
 
-    if (isAdmin || isModerator || isNational) {
-      if (qRegion) filter.region = qRegion;
+    if (qStatus) {
+      filter.status = qStatus;
+    }
+
+    if (isAdmin || isNational) {
+      if (qRegion) {
+        filter.region = qRegion;
+      }
+      // sans qRegion : admin/national voit tout
     } else {
-      if (!regionFromUser) return res.status(400).json({ error: "User has no region set" });
+      if (!regionFromUser) {
+        return res.status(400).json({ error: "User has no region set" });
+      }
+
       filter.region = regionFromUser;
     }
 
