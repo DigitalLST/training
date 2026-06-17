@@ -157,6 +157,17 @@ export default function GestionUsers(): React.JSX.Element {
   function goToUpdateEval(u: UserRow) {
     nav('/admin/updateeval', { state: { userId: u._id,nom:u.nom,prenom:u.prenom } });
   }
+  function goToUpdateDemandes(u: UserRow) {
+  nav('/admin/update_demandes', {
+    state: { userId: u._id, nom: u.nom, prenom: u.prenom },
+  });
+}
+
+function goToUpdateAffectations(u: UserRow) {
+  nav('/admin/update_affectations', {
+    state: { userId: u._id, nom: u.nom, prenom: u.prenom },
+  });
+}
 
   return (
     <div dir="rtl" style={{ width: '90vw', marginInline: 20, paddingInline: 24 }}>
@@ -326,6 +337,20 @@ export default function GestionUsers(): React.JSX.Element {
                           <IconBtn onClick={() => deleteUser(u)} title="حذف">
                             <TrashIcon />
                           </IconBtn>
+                          <button
+                            type="button"
+                            onClick={() => goToUpdateDemandes(u)}
+                            style={styles.resultsBtn}
+                          >
+                            تعديل المطالب
+                          </button>
+                           <button
+                            type="button"
+                            onClick={() => goToUpdateAffectations(u)}
+                            style={styles.resultsBtn}
+                          >
+                            تعديل التعيينات
+                          </button>
                           <button
                             type="button"
                             onClick={() => goToUpdateEval(u)}

@@ -49,6 +49,8 @@ import AdminHome from './admin/screens/AdminHome';
 import GestionAdmins from './admin/screens/ManageAdmins';
 import GestionUsers from './admin/screens/ManageUsers';
 import AdminUpdateEval from './admin/screens/UpdateEval';
+import AdminUpdateDemande from './admin/screens/ْUpdateDemande';
+import AdminUpdateAffecation from './admin/screens/UpdateAffectation'
 import AdminResultsValidation from './admin/screens/َApprobationResultat';
 import RegionLayout from './layouts/Region';
 import HomeRegion from './region/screens/Home';
@@ -61,6 +63,7 @@ import GestionFormationRegion from './region/screens/GestionFormation'
 import GestionAffectationReg from './region/screens/GestionAffectations';
 import FormationFinalRegion from './region/screens/DecisionFormation';
 import ResultatSession from './region/screens/ResultatSession';
+import AdminUpdateAffectations from './admin/screens/UpdateAffectation';
 
 export default function App() {
   return (
@@ -183,6 +186,8 @@ export default function App() {
           <Route index element={<AdminHome />} />
           <Route path="gestionadmin" element={<GestionAdmins />} />
           <Route path="gestionbd" element={<GestionUsers />} />
+          <Route path="update_demandes" element={<AdminUpdateDemande />} />
+          <Route path="update_affectations" element={<AdminUpdateAffectations />} />
           <Route path="updateeval" element={<AdminUpdateEval />} />
           <Route path="resultat" element={<AdminResultsValidation />} />
 

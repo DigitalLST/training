@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult, query, param } = require('express-validator');
 const User = require('../models/user');
+const Demande = require('../models/demande');
 const requireAuth = require('../middlewares/auth');
 const mongoose = require('mongoose'); 
 const router = express.Router();
@@ -449,6 +450,8 @@ router.get(
  * PATCH /users/:id
  * Permet de modifier: prenom, nom, email, idScout, niveau, branche, region
  */
+
+/* ---------- PATCH /users/:id ---------- */
 router.patch(
   '/:id',
   requireAuth,
@@ -470,24 +473,37 @@ router.patch(
     const { prenom, nom, email, idScout, niveau, branche, region } = req.body;
 
     const update = {};
-    if (typeof prenom !== 'undefined') update.prenom = prenom;
-    if (typeof nom !== 'undefined') update.nom = nom;
-    if (typeof email !== 'undefined') update.email = email;
-    if (typeof idScout !== 'undefined') update.idScout = idScout;
-    if (typeof niveau !== 'undefined') update.niveau = niveau;
-    if (typeof branche !== 'undefined') update.branche = branche;
-    if (typeof region !== 'undefined') update.region = region;
+    if (typeof prenom !== 'undefined') update.prenom = prenom.trim();
+    if (typeof nom !== 'undefined') update.nom = nom.trim();
+    if (typeof email !== 'undefined') update.email = email.trim().toLowerCase();
+    if (typeof idScout !== 'undefined') update.idScout = idScout.trim();
+    if (typeof niveau !== 'undefined') update.niveau = niveau.trim();
+    if (typeof branche !== 'undefined') update.branche = branche.trim();
+    if (typeof region !== 'undefined') update.region = region.trim();
 
     try {
       const user = await User.findByIdAndUpdate(
         id,
         { $set: update },
-        { new: true }
+        { new: true, runValidators: true }
       ).select('prenom nom email idScout region niveau branche role adminAccess');
 
       if (!user) {
         return res.status(404).json({ message: 'Utilisateur introuvable.' });
       }
+
+      await Demande.updateMany(
+        { applicant: user._id },
+        {
+          $set: {
+            'applicantSnapshot.idScout': user.idScout || '',
+            'applicantSnapshot.firstName': user.prenom || '',
+            'applicantSnapshot.lastName': user.nom || '',
+            'applicantSnapshot.email': user.email || '',
+            'applicantSnapshot.region': user.region || '',
+          },
+        }
+      );
 
       return res.json({
         _id: user._id,
@@ -503,9 +519,16 @@ router.patch(
       });
     } catch (err) {
       console.error('PATCH /users/:id ERROR', err);
-      return res
-        .status(500)
-        .json({ message: 'Erreur serveur lors de la mise à jour de l’utilisateur.' });
+
+      if (err.code === 11000) {
+        return res.status(409).json({
+          message: 'Email ou identifiant scout déjà utilisé.',
+        });
+      }
+
+      return res.status(500).json({
+        message: 'Erreur serveur lors de la mise à jour de l’utilisateur.',
+      });
     }
   }
 );

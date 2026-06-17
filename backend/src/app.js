@@ -23,6 +23,8 @@ const reportRoutes = require('../src/routes/reports');
 const adminRoutes = require('../src/routes/admins');
 const adminEvaluationsRouter = require('../src/routes/adminEvaluations');
 const adminResultsRouter = require('../src/routes/adminResults');
+const adminDemandesRoutes = require('./routes/adminDemandes');
+const adminAffectationsRoutes = require('./routes/adminAffectations');
 const demandeRegion=require("./routes/demandeRegions")
 
 
@@ -51,6 +53,8 @@ app.use('/api/final-decisions', decisionRoutes);
 app.use('/api/admins', adminRoutes);
 app.use('/api/admin/evaluations', adminEvaluationsRouter);
 app.use('/api/admin/results', adminResultsRouter);
+app.use('/api/admin/demandes', adminDemandesRoutes);
+app.use('/api/admin/affectations', adminAffectationsRoutes);
 app.use(
   '/static/signatures',
   express.static(path.join(__dirname, SIGNATURE_DIR))
