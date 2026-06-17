@@ -7,8 +7,8 @@ const RED = '#e20514';
 
 type CertifMini = {
   title?: string;
-  code?: string;              // ex: "L1", "L2", "L3", ...
-  date?: string | null;       // ISO string côté API
+  code?: string;
+  date?: string | null;
 };
 
 type Demande = {
@@ -37,11 +37,13 @@ function headers() {
 
 function fmtMonth(iso?: string) {
   return iso
-    ? new Date(iso).toLocaleDateString('ar-TN', { year: 'numeric', month: 'long' })
+    ? new Date(iso).toLocaleDateString('ar-TN', {
+        year: 'numeric',
+        month: 'long',
+      })
     : '—';
 }
 
-// format date de certif (jj/mm/aaaa en ar-TN)
 function fmtDate(iso?: string | null) {
   return iso
     ? new Date(iso).toLocaleDateString('ar-TN', {
@@ -52,7 +54,6 @@ function fmtDate(iso?: string | null) {
     : '—';
 }
 
-// récupère la date d’une certif par code dans le snapshot
 function certDateByCode(d: Demande, code: string): string {
   const c = d.certifsSnapshot?.find(
     x => (x.code || '').toUpperCase() === code.toUpperCase()
@@ -67,6 +68,7 @@ export default function ListeParticipants(): React.JSX.Element {
   const selection: Selection = useMemo(() => {
     const fromState = (state || {}) as Selection;
     if (fromState.sessionId && fromState.niveau) return fromState;
+
     try {
       const raw = sessionStorage.getItem('criteres:selection');
       return raw ? JSON.parse(raw) : { sessionId: '', niveau: '' };
@@ -84,22 +86,22 @@ export default function ListeParticipants(): React.JSX.Element {
 
   const [selectedRegion, setSelectedRegion] = useState('ALL');
   const [selectedBranche, setSelectedBranche] = useState('ALL');
+
   const [decisions, setDecisions] = useState<
     Record<string, 'APPROVED' | 'REJECTED'>
   >({});
 
-  // pagination
+  const [syncing, setSyncing] = useState(false);
+
   const [page, setPage] = useState(1);
   const pageSize = 50;
   const skip = (page - 1) * pageSize;
   const maxPage = Math.max(1, Math.ceil((total || 0) / pageSize));
 
-  const [syncing, setSyncing] = useState(false);
-
-  // ---- Fetch session meta ----
   useEffect(() => {
     (async () => {
       if (!selection.sessionId) return;
+
       try {
         const r = await fetch(
           `${API_BASE}/sessions/${selection.sessionId}?ts=${Date.now()}`,
@@ -108,19 +110,24 @@ export default function ListeParticipants(): React.JSX.Element {
             cache: 'no-store',
           }
         );
+
         if (!r.ok) return;
+
         const j = await r.json();
-        setSessionMeta({ title: j?.title, startDate: j?.startDate });
+        setSessionMeta({
+          title: j?.title,
+          startDate: j?.startDate,
+        });
       } catch {
         /* ignore */
       }
     })();
   }, [selection.sessionId]);
 
-  // ---- Fetch demandes (page courante) ----
   useEffect(() => {
     (async () => {
       if (!selection.sessionId || !selection.niveau) return;
+
       try {
         setLoading(true);
         setErr(null);
@@ -131,22 +138,21 @@ export default function ListeParticipants(): React.JSX.Element {
         params.set('skip', String(skip));
         params.set('limit', String(pageSize));
 
-        const res = await fetch(
-          `${API_BASE}/demandes?${params.toString()}`,
-          { headers: headers(), cache: 'no-store' }
-        );
+        const res = await fetch(`${API_BASE}/demandes?${params.toString()}`, {
+          headers: headers(),
+          cache: 'no-store',
+        });
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = await res.json();
 
-        // supporte deux formats :
-        // - nouveau: { items: [...], total, skip, limit }
-        // - ancien:  [ ... ]
         const rawList: any[] = Array.isArray(data)
           ? data
           : Array.isArray(data.items)
           ? data.items
           : [];
+
         const totalCount =
           typeof data.total === 'number' ? data.total : rawList.length;
 
@@ -164,20 +170,16 @@ export default function ListeParticipants(): React.JSX.Element {
         setDemandes(list);
         setTotal(totalCount);
 
-        // si on est sur une page > maxPage après filtre total, on redescend
         const newMax = Math.max(1, Math.ceil(totalCount / pageSize));
-        if (page > newMax) {
-          setPage(newMax);
-        }
+        if (page > newMax) setPage(newMax);
       } catch (e: any) {
         setErr(e.message || 'تعذّر الجلب');
       } finally {
         setLoading(false);
       }
     })();
-  }, [selection.sessionId, selection.niveau, skip, page, pageSize]);
+  }, [selection.sessionId, selection.niveau, skip, page]);
 
-  // ---- Filtres (sur la page courante) ----
   const regions = useMemo(
     () => [
       'ALL',
@@ -191,6 +193,7 @@ export default function ListeParticipants(): React.JSX.Element {
     ],
     [demandes]
   );
+
   const branches = useMemo(
     () => [
       'ALL',
@@ -199,27 +202,116 @@ export default function ListeParticipants(): React.JSX.Element {
     [demandes]
   );
 
-  // ---- Colonnes snapshot selon le niveau ----
   const snapshotCols = useMemo(() => {
-    const isPrep = selection.niveau === 'تمهيدية';
-    if (isPrep) {
+    if (selection.niveau === 'تمهيدية') {
       return [
-        { key: 'E1', label: 'الدراسة الابتداية', render: (_d: Demande) => '—' },
-        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'S2', label: 'S2', render: (_: Demande) => '—' },
-        { key: 'L2', label: 'L2', render: (d: Demande) => certDateByCode(d, 'L2') },
+        {
+          key: 'E1',
+          label: 'الدراسة الابتدائية',
+          render: (d: Demande) => certDateByCode(d, 'E1'),
+        },
+        {
+          key: 'L1',
+          label: 'L1',
+          render: (d: Demande) => certDateByCode(d, 'L1'),
+        },
+        {
+          key: 'S2',
+          label: 'S2',
+          render: (d: Demande) => certDateByCode(d, 'S2'),
+        },
+        {
+          key: 'L2',
+          label: 'L2',
+          render: (d: Demande) => certDateByCode(d, 'L2'),
+        },
       ];
     }
-    // défaut = شارة خشبية
+
+    if (selection.niveau === 'شارة خشبية') {
+      return [
+        {
+          key: 'E0',
+          label: 'الدراسة التمهيدية',
+          render: (d: Demande) => certDateByCode(d, 'E0'),
+        },
+        {
+          key: 'L1',
+          label: 'L1',
+          render: (d: Demande) => certDateByCode(d, 'L1'),
+        },
+        {
+          key: 'S3',
+          label: 'S3',
+          render: (d: Demande) => certDateByCode(d, 'S3'),
+        },
+        {
+          key: 'L3',
+          label: 'L3',
+          render: (d: Demande) => certDateByCode(d, 'L3'),
+        },
+      ];
+    }
+
+    if (selection.niveau === 'S2') {
+      return [
+        {
+          key: 'E0',
+          label: 'الدراسة التمهيدية',
+          render: (d: Demande) => certDateByCode(d, 'E0'),
+        },
+        {
+          key: 'S1',
+          label: 'S1',
+          render: (d: Demande) => certDateByCode(d, 'S1'),
+        },
+      ];
+    }
+
+    if (selection.niveau === 'S3') {
+      return [
+        {
+          key: 'E0',
+          label: 'الدراسة التمهيدية',
+          render: (d: Demande) => certDateByCode(d, 'E0'),
+        },
+        {
+          key: 'S2',
+          label: 'S2',
+          render: (d: Demande) => certDateByCode(d, 'S2'),
+        },
+      ];
+    }
+
     return [
-      { key: 'E0', label: 'الدراسة التمهيدية', render: (_: Demande) => '—' },
-      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-      { key: 'S3', label: 'S3', render: (_: Demande) => '—' },
-      { key: 'L3', label: 'L3', render: (d: Demande) => certDateByCode(d, 'L3') },
+      {
+        key: 'E0',
+        label: 'الدراسة التمهيدية',
+        render: (d: Demande) => certDateByCode(d, 'E0'),
+      },
+      {
+        key: 'E1',
+        label: 'الدراسة الابتدائية',
+        render: (d: Demande) => certDateByCode(d, 'E1'),
+      },
+      {
+        key: 'S1',
+        label: 'S1',
+        render: (d: Demande) => certDateByCode(d, 'S1'),
+      },
+      {
+        key: 'S2',
+        label: 'S2',
+        render: (d: Demande) => certDateByCode(d, 'S2'),
+      },
+      {
+        key: 'S3',
+        label: 'S3',
+        render: (d: Demande) => certDateByCode(d, 'S3'),
+      },
     ];
   }, [selection.niveau]);
 
-  // ---- Filtrage + tri (sur la page courante) ----
   const filteredSorted = useMemo(() => {
     const arr = demandes.filter(
       d =>
@@ -228,12 +320,14 @@ export default function ListeParticipants(): React.JSX.Element {
           d.applicantSnapshot?.region === selectedRegion) &&
         (selectedBranche === 'ALL' || d.branche === selectedBranche)
     );
+
     return arr.sort((a, b) => {
       const ra = (a.applicantSnapshot.region || '').localeCompare(
         b.applicantSnapshot.region || '',
         'ar'
       );
       if (ra !== 0) return ra;
+
       return (a.branche || '').localeCompare(b.branche || '', 'ar');
     });
   }, [demandes, selectedRegion, selectedBranche]);
@@ -242,16 +336,16 @@ export default function ListeParticipants(): React.JSX.Element {
     setDecisions(prev => ({ ...prev, [id]: value }));
   }
 
-  // ---- Resync certifs pour la page courante ----
   async function onResyncCertifs() {
     if (!selection.sessionId) return;
+
     try {
       setSyncing(true);
       setErr(null);
 
       const payload = {
         sessionId: selection.sessionId,
-        trainingLevel: selection.niveau, // si tu filtres côté back
+        trainingLevel: selection.niveau,
         skip,
         limit: pageSize,
       };
@@ -268,34 +362,35 @@ export default function ListeParticipants(): React.JSX.Element {
       }
 
       const j = await r.json();
+
       if (j.rateLimited) {
         alert(
           `تمّ تحديث شهادات ${j.processed || 0} مشارك في هذه الصفحة، ثمّ توقّف النظام بسبب حدود e-training. الرجاء إعادة المحاولة لاحقاً للبقيّة.`
         );
       } else {
-        alert(
-          `تمّ تحديث شهادات ${j.processed || 0} مشارك في هذه الصفحة.`
-        );
+        alert(`تمّ تحديث شهادات ${j.processed || 0} مشارك في هذه الصفحة.`);
       }
 
-      // recharger la page courante pour voir les snapshots à jour
       const params = new URLSearchParams();
       params.set('sessionId', selection.sessionId);
       params.set('trainingLevel', selection.niveau);
       params.set('skip', String(skip));
       params.set('limit', String(pageSize));
 
-      const r2 = await fetch(
-        `${API_BASE}/demandes?${params.toString()}`,
-        { headers: headers(), cache: 'no-store' }
-      );
+      const r2 = await fetch(`${API_BASE}/demandes?${params.toString()}`, {
+        headers: headers(),
+        cache: 'no-store',
+      });
+
       if (r2.ok) {
         const data2 = await r2.json();
+
         const rawList: any[] = Array.isArray(data2)
           ? data2
           : Array.isArray(data2.items)
           ? data2.items
           : [];
+
         const totalCount =
           typeof data2.total === 'number' ? data2.total : rawList.length;
 
@@ -320,7 +415,6 @@ export default function ListeParticipants(): React.JSX.Element {
     }
   }
 
-  // ---- Affichage décision nationale ----
   function renderNationalCell(d: Demande) {
     const regionName = d.applicantSnapshot.region || '';
     const isNational = regionName === 'قائد وطني';
@@ -338,6 +432,7 @@ export default function ListeParticipants(): React.JSX.Element {
               />{' '}
               قبول
             </label>
+
             <label style={{ marginInlineStart: 12 }}>
               <input
                 type="radio"
@@ -350,12 +445,15 @@ export default function ListeParticipants(): React.JSX.Element {
           </>
         );
       }
+
       return <StatusBadge value={d.statusNational} />;
     }
 
     if (d.statusRegion === 'PENDING') {
       return (
-        <span style={{ color: '#6b7280' }}>في انتظار قرار اللجنة الجهوية</span>
+        <span style={{ color: '#6b7280' }}>
+          في انتظار قرار اللجنة الجهوية
+        </span>
       );
     }
 
@@ -371,6 +469,7 @@ export default function ListeParticipants(): React.JSX.Element {
             />{' '}
             قبول
           </label>
+
           <label style={{ marginInlineStart: 12 }}>
             <input
               type="radio"
@@ -389,7 +488,11 @@ export default function ListeParticipants(): React.JSX.Element {
 
   async function submitNationalDecisions() {
     const updates = Object.entries(decisions);
-    if (!updates.length) return alert('لم يتم اختيار أي قرار.');
+
+    if (!updates.length) {
+      return alert('لم يتم اختيار أي قرار.');
+    }
+
     try {
       await Promise.all(
         updates.map(async ([id, value]) => {
@@ -398,10 +501,13 @@ export default function ListeParticipants(): React.JSX.Element {
             headers: headers(),
             body: JSON.stringify({ statusNational: value }),
           });
+
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
         })
       );
+
       alert('تمّ حفظ القرارات الوطنية بنجاح ✅');
+
       setDemandes(prev =>
         prev.map(d =>
           decisions[d._id]
@@ -409,6 +515,7 @@ export default function ListeParticipants(): React.JSX.Element {
             : d
         )
       );
+
       setDecisions({});
     } catch (e: any) {
       alert(e.message || 'تعذّر الحفظ');
@@ -416,6 +523,7 @@ export default function ListeParticipants(): React.JSX.Element {
   }
 
   const onBack = () => nav('/moderator/gestionparticipants');
+
   const headerTitle = `${sessionMeta?.title ?? ''} — ${fmtMonth(
     sessionMeta?.startDate
   )} — ${selection.niveau}`;
@@ -430,14 +538,15 @@ export default function ListeParticipants(): React.JSX.Element {
           <button onClick={onBack} style={styles.circleRedBtn}>
             <ArrowRightIcon />
           </button>
+
           <span>{headerTitle}</span>
         </div>
 
-        {/* Pagination header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>
             الصفحة {page} / {maxPage} — المجموع: {total}
           </span>
+
           <button
             type="button"
             onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -446,6 +555,7 @@ export default function ListeParticipants(): React.JSX.Element {
           >
             الصفحة السابقة
           </button>
+
           <button
             type="button"
             onClick={() => setPage(p => Math.min(maxPage, p + 1))}
@@ -462,11 +572,11 @@ export default function ListeParticipants(): React.JSX.Element {
       {loading && <div>... جاري التحميل</div>}
       {err && <div style={{ color: RED }}>❌ {err}</div>}
 
-      {/* Filtres */}
       {!loading && (
         <>
           <div style={styles.metaLine}>
             <span>الجهة:</span>
+
             <div style={styles.badges}>
               {regions.map(r => (
                 <button
@@ -485,6 +595,7 @@ export default function ListeParticipants(): React.JSX.Element {
 
           <div style={styles.metaLine}>
             <span>القسم الفني:</span>
+
             <div style={styles.badges}>
               {branches.map(b => (
                 <button
@@ -503,7 +614,6 @@ export default function ListeParticipants(): React.JSX.Element {
         </>
       )}
 
-      {/* Tableau */}
       <div style={{ overflowX: 'auto', marginTop: 12 }}>
         <table style={styles.table} dir="rtl">
           <thead>
@@ -515,7 +625,6 @@ export default function ListeParticipants(): React.JSX.Element {
               <th style={styles.thRight}>الجهة</th>
               <th style={styles.thRight}>القسم</th>
 
-              {/* Colonnes snapshot dynamiques */}
               {snapshotCols.map(col => (
                 <th key={col.key} style={styles.thRight}>
                   {col.label}
@@ -526,25 +635,30 @@ export default function ListeParticipants(): React.JSX.Element {
               <th style={styles.thRight}>القرار الوطني</th>
             </tr>
           </thead>
+
           <tbody>
             {filteredSorted.map((d, idx) => (
               <tr key={d._id}>
                 <td style={styles.tdRight}>{skip + idx + 1}</td>
+
                 <td style={styles.tdRight}>
                   {d.applicantSnapshot.idScout || '—'}
                 </td>
+
                 <td style={styles.tdRight}>
                   {d.applicantSnapshot.firstName || '—'}
                 </td>
+
                 <td style={styles.tdRight}>
                   {d.applicantSnapshot.lastName || '—'}
                 </td>
+
                 <td style={styles.tdRight}>
                   {d.applicantSnapshot.region || '—'}
                 </td>
+
                 <td style={styles.tdRight}>{d.branche || '—'}</td>
 
-                {/* Valeurs snapshot selon niveau */}
                 {snapshotCols.map(col => (
                   <td key={col.key} style={styles.tdRight}>
                     {col.render(d)}
@@ -554,14 +668,16 @@ export default function ListeParticipants(): React.JSX.Element {
                 <td style={styles.tdRight}>
                   <StatusBadge value={d.statusRegion} />
                 </td>
+
                 <td style={styles.tdRight}>{renderNationalCell(d)}</td>
               </tr>
             ))}
+
             {!filteredSorted.length && !loading && (
               <tr>
                 <td
                   colSpan={8 + snapshotCols.length}
-                  style={{ textAlign: 'center', color: '#777' }}
+                  style={{ textAlign: 'center', color: '#777', padding: 20 }}
                 >
                   لا توجد مطالب مطابقة.
                 </td>
@@ -583,30 +699,34 @@ export default function ListeParticipants(): React.JSX.Element {
         <button onClick={submitNationalDecisions} style={styles.pillPrimary}>
           حفظ القرارات الوطنية
         </button>
+
         <button
           onClick={onResyncCertifs}
           style={styles.pillPrimary}
           disabled={syncing || loading || !demandes.length}
         >
-          {syncing ? '... جارٍ التحديث لهذه الصفحة' : 'تحديث معطيات التدريب عن بعد لهذه الصفحة'}
+          {syncing
+            ? '... جارٍ التحديث لهذه الصفحة'
+            : 'تحديث معطيات التدريب عن بعد لهذه الصفحة'}
         </button>
       </div>
     </div>
   );
 }
 
-/* ---------- Status badge ---------- */
 function StatusBadge({ value }: { value: string }) {
   const colors: Record<string, string> = {
     APPROVED: '#059669',
     REJECTED: '#b91c1c',
     PENDING: '#6b7280',
   };
+
   const labels: Record<string, string> = {
     APPROVED: 'مقبول',
     REJECTED: 'مرفوض',
     PENDING: 'قيد الدراسة',
   };
+
   return (
     <span
       style={{
@@ -623,7 +743,6 @@ function StatusBadge({ value }: { value: string }) {
   );
 }
 
-/* ---------- styles ---------- */
 const styles: Record<string, React.CSSProperties> = {
   toolbar: {
     display: 'flex',
@@ -632,7 +751,13 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     marginTop: 20,
   },
-  toolbarRight: { display: 'flex', alignItems: 'center', gap: 10 } as any,
+
+  toolbarRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+  },
+
   circleRedBtn: {
     width: 46,
     height: 46,
@@ -644,14 +769,27 @@ const styles: Record<string, React.CSSProperties> = {
     placeItems: 'center',
     cursor: 'pointer',
   },
+
   redLine: {
     height: 3,
     background: RED,
     borderRadius: 2,
     margin: '8px 0',
   },
-  metaLine: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 },
-  badges: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+
+  metaLine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+
+  badges: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+
   badgeButton: {
     border: `1px solid ${RED}`,
     color: RED,
@@ -661,18 +799,32 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: 13,
   },
-  badgeActive: { background: RED, color: '#fff' },
-  table: { width: '100%', borderCollapse: 'collapse', background: '#fff' },
+
+  badgeActive: {
+    background: RED,
+    color: '#fff',
+  },
+
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    background: '#fff',
+  },
+
   thRight: {
     textAlign: 'right',
     padding: '10px 12px',
     borderBottom: '1px solid #eef2f7',
+    whiteSpace: 'nowrap',
   },
+
   tdRight: {
     textAlign: 'right',
     padding: '10px 12px',
     borderTop: '1px solid #f3f4f6',
+    whiteSpace: 'nowrap',
   },
+
   pillPrimary: {
     padding: '10px 16px',
     borderRadius: 999,
@@ -682,6 +834,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontWeight: 700,
   },
+
   pillSecondary: {
     padding: '6px 10px',
     borderRadius: 999,
@@ -693,7 +846,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
 };
 
-/* ---------- icon ---------- */
 function ArrowRightIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24">

@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const Demande = require('../models/demande');
 const Session = require('../models/session');
 const SessionAffectation = require('../models/affectation');
+const FinalDecision = require('../models/finalDecision');
 const User = require('../models/user');
 const requireAuth = require('../middlewares/auth');
 
@@ -309,7 +310,9 @@ router.get('/', requireAuth, async (req, res, next) => {
     const skip = Number(req.query.skip ?? 0);
     const limit = Math.min(Number(req.query.limit ?? 50), 200);
 
-    if (!isValidId(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' });
+    if (!isValidId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId' });
+    }
 
     const filt = { session: sessionId };
     if (trainingLevel) filt.trainingLevel = trainingLevel;
@@ -319,7 +322,109 @@ router.get('/', requireAuth, async (req, res, next) => {
       Demande.countDocuments(filt),
     ]);
 
-    res.json({ items: list, total, skip, limit });
+    const userIds = list.map(d => d.applicant).filter(Boolean);
+
+    const finalDecisions = await FinalDecision.find({
+      trainee: { $in: userIds },
+      decision: 'success',
+      status: 'validated',
+    })
+      .populate({
+        path: 'formation',
+        select: 'niveau session',
+        populate: {
+          path: 'session',
+          select: 'title startDate endDate',
+        },
+      })
+      .lean();
+
+    function niveauToCode(niveau) {
+      const n = normalize(niveau);
+
+      if (n === 'تمهيدية') return 'E0';
+      if (n === 'الدراسة التمهيدية') return 'E0';
+      if (n === 'الدراسة الابتدائية') return 'E1';
+      if (n === 'S1') return 'S1';
+      if (n === 'S2') return 'S2';
+      if (n === 'S3') return 'S3';
+
+      return null;
+    }
+
+    function niveauToTitle(niveau) {
+      const n = normalize(niveau);
+
+      if (n === 'تمهيدية') return 'الدراسة التمهيدية';
+      if (n === 'الدراسة التمهيدية') return 'الدراسة التمهيدية';
+      if (n === 'الدراسة الابتدائية') return 'الدراسة الابتدائية';
+
+      return n;
+    }
+
+    function sessionDate(fd) {
+      const s = fd.formation?.session;
+      return s?.endDate || s?.startDate || null;
+    }
+
+    const certifsByUser = new Map();
+
+    for (const fd of finalDecisions) {
+      const userKey = String(fd.trainee);
+      const niveau = fd.formation?.niveau;
+      const code = niveauToCode(niveau);
+      const date = sessionDate(fd);
+
+      if (!code || !date) continue;
+
+      if (!certifsByUser.has(userKey)) {
+        certifsByUser.set(userKey, new Map());
+      }
+
+      const byCode = certifsByUser.get(userKey);
+      const existing = byCode.get(code);
+
+      // garder la session la plus récente pour ce user + ce niveau
+      if (!existing || new Date(date) > new Date(existing.date)) {
+        byCode.set(code, {
+          code,
+          title: niveauToTitle(niveau),
+          date,
+        });
+      }
+    }
+
+    const items = list.map(d => {
+      const existingCertifs = Array.isArray(d.certifsSnapshot)
+        ? d.certifsSnapshot
+        : [];
+
+      const finalDecisionCertifsMap = certifsByUser.get(String(d.applicant));
+      const finalDecisionCertifs = finalDecisionCertifsMap
+        ? Array.from(finalDecisionCertifsMap.values())
+        : [];
+
+      const merged = new Map();
+
+      for (const c of existingCertifs) {
+        if (c?.code) {
+          merged.set(String(c.code).toUpperCase(), c);
+        }
+      }
+
+      for (const c of finalDecisionCertifs) {
+        if (c?.code) {
+          merged.set(String(c.code).toUpperCase(), c);
+        }
+      }
+
+      return {
+        ...d,
+        certifsSnapshot: Array.from(merged.values()),
+      };
+    });
+
+    return res.json({ items, total, skip, limit });
   } catch (err) {
     next(err);
   }
