@@ -572,14 +572,21 @@ router.get('/regional', requireAuth, async (req, res, next) => {
     const skip = Number(req.query.skip ?? 0);
     const limit = Math.min(Number(req.query.limit ?? 50), 200);
 
-    if (!isValidId(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' });
+    if (!isValidId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId' });
+    }
 
     const userReg = normalize(req.user?.region);
     const national = isNationalUserFromUser(req.user);
 
-    if (!userReg && !national) return res.status(403).json({ error: 'Missing user region' });
+    if (!userReg && !national) {
+      return res.status(403).json({ error: 'Missing user region' });
+    }
 
-    const s = await Session.findById(sessionId).select('organizer organizerRegion organizerName').lean();
+    const s = await Session.findById(sessionId)
+      .select('organizer organizerRegion organizerName')
+      .lean();
+
     if (!s) return res.status(404).json({ error: 'Session not found' });
 
     const organizer = normalize(s.organizer || s.organizerRegion || s.organizerName);
@@ -587,11 +594,17 @@ router.get('/regional', requireAuth, async (req, res, next) => {
     const filt = { session: sessionId };
     if (trainingLevel) filt.trainingLevel = trainingLevel;
 
-    // 🔎 visibilité (conserve ton comportement historique)
     if (!national) {
       const level = normalize(trainingLevel);
-      const allowAllRegions = organizer && userReg && organizer === userReg && !isExcludedLevel(level);
-      if (!allowAllRegions) filt['applicantSnapshot.region'] = userReg;
+      const allowAllRegions =
+        organizer &&
+        userReg &&
+        organizer === userReg &&
+        !isExcludedLevel(level);
+
+      if (!allowAllRegions) {
+        filt['applicantSnapshot.region'] = userReg;
+      }
     }
 
     const [list, total] = await Promise.all([
@@ -599,29 +612,118 @@ router.get('/regional', requireAuth, async (req, res, next) => {
       Demande.countDocuments(filt),
     ]);
 
+    const userIds = list.map(d => d.applicant).filter(Boolean);
+
+    const finalDecisions = await FinalDecision.find({
+      trainee: { $in: userIds },
+      decision: 'success',
+      status: 'validated',
+    })
+      .populate({
+        path: 'formation',
+        select: 'niveau session',
+        populate: {
+          path: 'session',
+          select: 'title startDate endDate',
+        },
+      })
+      .lean();
+
+    function niveauToCode(niveau) {
+      const n = normalize(niveau);
+
+      if (n === 'تمهيدية') return 'E0';
+      if (n === 'الدراسة التمهيدية') return 'E0';
+      if (n === 'الدراسة الابتدائية') return 'E1';
+      if (n === 'S1') return 'S1';
+      if (n === 'S2') return 'S2';
+      if (n === 'S3') return 'S3';
+
+      return null;
+    }
+
+    function niveauToTitle(niveau) {
+      const n = normalize(niveau);
+
+      if (n === 'تمهيدية') return 'الدراسة التمهيدية';
+      if (n === 'الدراسة التمهيدية') return 'الدراسة التمهيدية';
+      if (n === 'الدراسة الابتدائية') return 'الدراسة الابتدائية';
+
+      return n;
+    }
+
+    function sessionDateFromFinalDecision(fd) {
+      const sess = fd.formation?.session;
+      return sess?.endDate || sess?.startDate || null;
+    }
+
+    const certifsByUser = new Map();
+
+    for (const fd of finalDecisions) {
+      const userKey = String(fd.trainee);
+      const niveau = fd.formation?.niveau;
+      const code = niveauToCode(niveau);
+      const date = sessionDateFromFinalDecision(fd);
+
+      if (!code || !date) continue;
+
+      if (!certifsByUser.has(userKey)) {
+        certifsByUser.set(userKey, new Map());
+      }
+
+      const byCode = certifsByUser.get(userKey);
+      const existing = byCode.get(code);
+
+      if (!existing || new Date(date) > new Date(existing.date)) {
+        byCode.set(code, {
+          title: niveauToTitle(niveau),
+          code,
+          date,
+        });
+      }
+    }
+
     const isRegionalMod = isRegionalModeratorFromUser(req.user);
     const lvl = normalize(trainingLevel);
     const excluded = isExcludedLevel(lvl);
 
-    const items = list.map((d) => {
+    const items = list.map(d => {
       const applicantReg = normalize(d.applicantSnapshot?.region);
 
-      // ✅ peut décider statusRegion si: national OR (regional mod + même région que demandeur)
-      const canSetRegion = national || (isRegionalMod && userReg && applicantReg && userReg === applicantReg);
+      const canSetRegion =
+        national ||
+        (isRegionalMod && userReg && applicantReg && userReg === applicantReg);
 
-      // ✅ peut décider statusNational si:
-      // - si excluded level: national only
-      // - sinon: national OR (regional mod + même région que l'organisateur)
       const canSetNational = excluded
         ? national
-        : (national || (isRegionalMod && userReg && organizer && userReg === organizer));
-          console.log('USER.role=', req.user?.role);
-    console.log('USER.region=', JSON.stringify(req.user?.region), 'len=', String(req.user?.region||'').length);
-    console.log('APP.region=', JSON.stringify(d.applicantSnapshot?.region), 'len=', String(d.applicantSnapshot?.region||'').length);
-    console.log('NORM user=', JSON.stringify(userReg));
-    console.log('NORM app =', JSON.stringify(applicantReg));
+        : national || (isRegionalMod && userReg && organizer && userReg === organizer);
+
+      const existingCertifs = Array.isArray(d.certifsSnapshot)
+        ? d.certifsSnapshot
+        : [];
+
+      const finalDecisionCertifsMap = certifsByUser.get(String(d.applicant));
+      const finalDecisionCertifs = finalDecisionCertifsMap
+        ? Array.from(finalDecisionCertifsMap.values())
+        : [];
+
+      const mergedCertifs = new Map();
+
+      for (const c of existingCertifs) {
+        if (c?.code) {
+          mergedCertifs.set(String(c.code).toUpperCase(), c);
+        }
+      }
+
+      for (const c of finalDecisionCertifs) {
+        if (c?.code) {
+          mergedCertifs.set(String(c.code).toUpperCase(), c);
+        }
+      }
+
       return {
         ...d,
+        certifsSnapshot: Array.from(mergedCertifs.values()),
         _ui: {
           level: lvl,
           isExcludedLevel: excluded,
@@ -630,15 +732,9 @@ router.get('/regional', requireAuth, async (req, res, next) => {
           canSetNational,
         },
       };
-      
-
     });
 
-
-
     return res.json({ items, total, skip, limit });
-
-
   } catch (err) {
     next(err);
   }

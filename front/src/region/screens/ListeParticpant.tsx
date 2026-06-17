@@ -189,55 +189,63 @@ export default function ListeParticipants(): React.JSX.Element {
     () => ['ALL', ...Array.from(new Set(demandes.map(d => d.branche).filter(Boolean)))],
     [demandes]
   );
-
   const snapshotCols = useMemo(() => {
-    const lvl = selection.niveau;
+  const lvl = selection.niveau;
 
-    if (lvl === 'تمهيدية') {
-      return [
-        { key: 'E1', label: 'الدراسة الابتداية', render: (_d: Demande) => '—' },
-        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'S2', label: 'S2', render: (_: Demande) => '—' },
-        { key: 'L2', label: 'L2', render: (d: Demande) => certDateByCode(d, 'L2') },
-      ];
-    }
+  if (lvl === 'تمهيدية') {
+    return [
+      { key: 'E1', label: 'الدراسة الابتدائية', render: (d: Demande) => certDateByCode(d, 'E1') },
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'S2', label: 'S2', render: (d: Demande) => certDateByCode(d, 'S2') },
+      { key: 'L2', label: 'L2', render: (d: Demande) => certDateByCode(d, 'L2') },
+    ];
+  }
 
-    if (lvl === 'شارة خشبية') {
-      return [
-        { key: 'E0', label: 'الدراسة التمهيدية', render: (_: Demande) => '—' },
-        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'S3', label: 'S3', render: (_: Demande) => '—' },
-        { key: 'L3', label: 'L3', render: (d: Demande) => certDateByCode(d, 'L3') },
-      ];
-    }
+  if (lvl === 'شارة خشبية') {
+    return [
+      { key: 'E0', label: 'الدراسة التمهيدية', render: (d: Demande) => certDateByCode(d, 'E0') },
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'S3', label: 'S3', render: (d: Demande) => certDateByCode(d, 'S3') },
+      { key: 'L3', label: 'L3', render: (d: Demande) => certDateByCode(d, 'L3') },
+    ];
+  }
 
-    if (lvl === 'S1') return [{ key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') }];
+  if (lvl === 'S1') {
+    return [
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'E0', label: 'الدراسة التمهيدية', render: (d: Demande) => certDateByCode(d, 'E0') },
+    ];
+  }
 
-    if (lvl === 'الدراسة الابتدائية') {
-      return [
-        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'S1', label: 'S1', render: (d: Demande) => renderS1ForPrimary(d, sessionMeta?.startDate) },
-      ];
-    }
+  if (lvl === 'الدراسة الابتدائية') {
+    return [
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'S1', label: 'S1', render: (d: Demande) => renderS1ForPrimary(d, sessionMeta?.startDate) },
+    ];
+  }
 
-    if (lvl === 'S2') {
-      return [
-        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'L2', label: 'L2', render: (d: Demande) => certDateByCode(d, 'L2') },
-        { key: 'E1', label: 'الدراسة الابتدائية', render: (d: Demande) => certDateByCode(d, 'E1') },
-      ];
-    }
+  if (lvl === 'S2') {
+    return [
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'L2', label: 'L2', render: (d: Demande) => certDateByCode(d, 'L2') },
+      { key: 'E1', label: 'الدراسة الابتدائية', render: (d: Demande) => certDateByCode(d, 'E1') },
+      { key: 'S1', label: 'S1', render: (d: Demande) => certDateByCode(d, 'S1') },
+    ];
+  }
 
-    if (lvl === 'S3') {
-      return [
-        { key: 'E0', label: 'الدراسة التمهيدية', render: (d: Demande) => certDateByCode(d, 'E0') },
-        { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
-        { key: 'L3', label: 'L3', render: (d: Demande) => certDateByCode(d, 'L3') },
-      ];
-    }
+  if (lvl === 'S3') {
+    return [
+      { key: 'E0', label: 'الدراسة التمهيدية', render: (d: Demande) => certDateByCode(d, 'E0') },
+      { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+      { key: 'L3', label: 'L3', render: (d: Demande) => certDateByCode(d, 'L3') },
+      { key: 'S2', label: 'S2', render: (d: Demande) => certDateByCode(d, 'S2') },
+    ];
+  }
 
-    return [{ key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') }];
-  }, [selection.niveau, sessionMeta?.startDate]);
+  return [
+    { key: 'L1', label: 'L1', render: (d: Demande) => certDateByCode(d, 'L1') },
+  ];
+}, [selection.niveau, sessionMeta?.startDate]);
 
   const filteredSorted = useMemo(() => {
     const arr = demandes.filter(
