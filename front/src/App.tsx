@@ -63,7 +63,6 @@ import GestionFormationRegion from './region/screens/GestionFormation'
 import GestionAffectationReg from './region/screens/GestionAffectations';
 import FormationFinalRegion from './region/screens/DecisionFormation';
 import ResultatSession from './region/screens/ResultatSession';
-import AdminUpdateAffectations from './admin/screens/UpdateAffectation';
 
 export default function App() {
   return (
@@ -187,7 +186,7 @@ export default function App() {
           <Route path="gestionadmin" element={<GestionAdmins />} />
           <Route path="gestionbd" element={<GestionUsers />} />
           <Route path="update_demandes" element={<AdminUpdateDemande />} />
-          <Route path="update_affectations" element={<AdminUpdateAffectations />} />
+          <Route path="update_affectations" element={<AdminUpdateAffecation />} />
           <Route path="updateeval" element={<AdminUpdateEval />} />
           <Route path="resultat" element={<AdminResultsValidation />} />
 
