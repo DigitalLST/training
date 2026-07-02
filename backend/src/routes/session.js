@@ -205,7 +205,7 @@ router.patch('/:id', async (req, res, next) => {
     if (!Array.isArray(trainingLevels)) trainingLevels = [];
     trainingLevels = [...new Set(trainingLevels.map(String).map(s => s.trim()))];
 
-    const ALLOWED = new Set(['شارة خشبية', 'تمهيدية']);
+    const ALLOWED = new Set(['تمهيدية','شارة خشبية','S1','S2','S3','الدراسة الابتدائية']);
     const ALLOWED_B = new Set(['رواد','جوالة','دليلات','كشافة','مرشدات','أشبال','زهرات','عصافير']);
     for (const v of trainingLevels) if (!ALLOWED.has(v)) {
       return res.status(400).json({ error: `Invalid training level: ${v}` });
