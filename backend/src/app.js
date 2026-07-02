@@ -66,15 +66,20 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOS
 
 async function start() {
   try {
-    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/scouts_training';
+    let uri;
+    if (process.env.DB_APP_USER && process.env.DB_APP_PASS) {
+      uri = `mongodb://${process.env.DB_APP_USER}:${process.env.DB_APP_PASS}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?authSource=leadership`;
+    } else {
+      uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/scouts_training';
+    }
     mongoose.set('strictQuery', true);
     await mongoose.connect(uri, { autoIndex: true });
-    console.log('✅ Mongo connected');
+    console.log('? Mongo connected');
 
     const port = process.env.PORT || 4000;
-    app.listen(port, () => console.log(`🚀 API running on :${port}`));
+    app.listen(port, () => console.log(`?? API running on :${port}`));
   } catch (err) {
-    console.error('❌ Startup error:', err);
+    console.error('? Startup error:', err);
     process.exit(1);
   }
 }
