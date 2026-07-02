@@ -413,7 +413,28 @@ router.patch("/:id/decision", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+router.patch("/:id/reset-submitted", requireAuth, async (req, res) => {
+  try {
+    if (!req.user?.isAdmin && !req.user?.isNational) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
+    const updated = await RegionSessionRequest.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: { status: "SUBMITTED" },
+        $unset: { generated_session_id: "" }
+      },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ error: "Request not found" });
+
+    return res.json({ ok: true, request: updated });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 /* -------------------- INSCRIPTION DATES OVERRIDE -------------------- */
 /**
  * PATCH /api/region-session-requests/:id/inscription-dates
