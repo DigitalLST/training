@@ -1,9 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
-
 const { param, validationResult } = require('express-validator');
-const { ZipArchive } = require('archiver');
-
+const archiver = require('archiver');
 
 const requireAuth = require('../middlewares/auth');
 
@@ -14,7 +12,6 @@ const SessionAffectation = require('../models/affectation');
 const {
   generateFormationTraineesPdf,
 } = require('../services/pdf');
-const archiver = require('archiver');
 
 const router = express.Router();
 
@@ -31,7 +28,9 @@ function sanitizeFileName(value) {
 }
 
 function formatZipDate(dateValue) {
-  const date = dateValue ? new Date(dateValue) : new Date();
+  const date = dateValue
+    ? new Date(dateValue)
+    : new Date();
 
   if (Number.isNaN(date.getTime())) {
     return new Date().toISOString().slice(0, 10);
@@ -51,7 +50,11 @@ function formatZipDate(dateValue) {
 router.get(
   '/sessions/:sessionId/trainees.zip',
   requireAuth,
-  [param('sessionId').isMongoId().withMessage('sessionId invalide')],
+  [
+    param('sessionId')
+      .isMongoId()
+      .withMessage('sessionId invalide'),
+  ],
   async (req, res) => {
     const errors = validationResult(req);
 
@@ -97,60 +100,76 @@ router.get(
         });
       }
 
-      const formationIds = formations.map((formation) => formation._id);
+      const formationIds = formations.map(
+        formation => formation._id
+      );
 
-      /*
-       * On récupère toutes les affectations trainee en une seule requête,
-       * au lieu de faire une requête MongoDB par formation.
-       */
       const affectations = await SessionAffectation.find({
-        formation: { $in: formationIds },
+        formation: {
+          $in: formationIds,
+        },
         role: 'trainee',
       })
         .select('_id formation user role')
         .populate({
           path: 'user',
-          select: '_id idScout nom prenom email region',
+          select:
+            '_id idScout nom prenom email region',
         })
         .lean();
 
-      /*
-       * Regroupement des trainees par formation.
-       */
       const traineesByFormation = new Map();
 
       for (const affectation of affectations) {
-        if (!affectation.formation || !affectation.user) {
+        if (
+          !affectation.formation ||
+          !affectation.user
+        ) {
           continue;
         }
 
-        const formationId = String(affectation.formation);
+        const formationId = String(
+          affectation.formation
+        );
 
-        if (!traineesByFormation.has(formationId)) {
-          traineesByFormation.set(formationId, []);
+        if (
+          !traineesByFormation.has(formationId)
+        ) {
+          traineesByFormation.set(
+            formationId,
+            []
+          );
         }
 
-        traineesByFormation.get(formationId).push({
-          idScout: affectation.user.idScout || '',
-          nom: affectation.user.nom || '',
-          prenom: affectation.user.prenom || '',
-          email: affectation.user.email || '',
-          region: affectation.user.region || '',
-        });
+        traineesByFormation
+          .get(formationId)
+          .push({
+            idScout:
+              affectation.user.idScout || '',
+            nom:
+              affectation.user.nom || '',
+            prenom:
+              affectation.user.prenom || '',
+            email:
+              affectation.user.email || '',
+            region:
+              affectation.user.region || '',
+          });
       }
 
       const safeSessionTitle =
-        sanitizeFileName(session.title) || `session-${sessionId}`;
+        sanitizeFileName(session.title) ||
+        `session-${sessionId}`;
 
       const zipFileName =
-        `قوائم-المتدربين-${safeSessionTitle}-${formatZipDate(session.startDate)}.zip`;
+        `قوائم-المتدربين-${safeSessionTitle}-` +
+        `${formatZipDate(session.startDate)}.zip`;
 
-      res.status(200);
-      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader(
+        'Content-Type',
+        'application/zip'
+      );
 
-      /*
-       * filename* permet de conserver correctement les caractères arabes.
-       */
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="trainees-${sessionId}.zip"; filename*=UTF-8''${encodeURIComponent(
@@ -158,71 +177,98 @@ router.get(
         )}`
       );
 
-      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader(
+        'Cache-Control',
+        'no-store, max-age=0'
+      );
 
-      const archive = ZipArchive('zip', {
+      /*
+       * Même logique que report-by-region.zip.
+       */
+      const archive = archiver('zip', {
         zlib: {
           level: 9,
         },
       });
 
-      archive.on('warning', (error) => {
-        console.warn('ZIP WARNING:', error);
+      archive.on('warning', error => {
+        console.warn(
+          'ZIP WARNING:',
+          error
+        );
       });
 
-      archive.on('error', (error) => {
-        console.error('ZIP ERROR:', error);
+      archive.on('error', error => {
+        console.error(
+          'ZIP ERROR:',
+          error
+        );
 
-        /*
-         * Si les headers n’ont pas encore été envoyés,
-         * on peut encore retourner du JSON.
-         */
-        if (!res.headersSent) {
-          return res.status(500).json({
-            error: 'Erreur pendant la génération du ZIP',
-          });
+        try {
+          if (!res.headersSent) {
+            res.status(500);
+          }
+
+          res.end();
+        } catch (_) {
+          // Rien à faire.
         }
-
-        res.destroy(error);
       });
 
       archive.pipe(res);
 
       /*
-       * Génération séquentielle :
-       * évite de lancer plusieurs Chromium en parallèle sur Render.
+       * Génération séquentielle afin d’éviter plusieurs
+       * navigateurs Chromium en parallèle.
        */
-      for (let index = 0; index < formations.length; index += 1) {
+      for (
+        let index = 0;
+        index < formations.length;
+        index += 1
+      ) {
         const formation = formations[index];
 
-        const trainees =
-          traineesByFormation.get(String(formation._id)) || [];
+        const trainees = (
+          traineesByFormation.get(
+            String(formation._id)
+          ) || []
+        ).slice();
 
         trainees.sort((a, b) => {
-          const regionComparison = String(a.region || '').localeCompare(
-            String(b.region || ''),
-            'ar',
-            { sensitivity: 'base' }
-          );
+          const regionComparison =
+            String(a.region || '').localeCompare(
+              String(b.region || ''),
+              'ar',
+              {
+                sensitivity: 'base',
+              }
+            );
 
           if (regionComparison !== 0) {
             return regionComparison;
           }
 
-          const nameComparison = String(a.nom || '').localeCompare(
-            String(b.nom || ''),
-            'ar',
-            { sensitivity: 'base' }
-          );
+          const nameComparison =
+            String(a.nom || '').localeCompare(
+              String(b.nom || ''),
+              'ar',
+              {
+                sensitivity: 'base',
+              }
+            );
 
           if (nameComparison !== 0) {
             return nameComparison;
           }
 
-          return String(a.prenom || '').localeCompare(
+          return String(
+            a.prenom || ''
+          ).localeCompare(
             String(b.prenom || ''),
             'ar',
-            { sensitivity: 'base' }
+            {
+              sensitivity: 'base',
+            }
           );
         });
 
@@ -240,15 +286,20 @@ router.get(
           session: {
             _id: String(session._id),
             title: session.title || '',
-            startDate: session.startDate || null,
-            endDate: session.endDate || null,
+            startDate:
+              session.startDate || null,
+            endDate:
+              session.endDate || null,
           },
 
           formation: {
             _id: String(formation._id),
             nom: formation.nom || '',
-            niveau: formation.niveau || '',
-            branches: Array.isArray(formation.branches)
+            niveau:
+              formation.niveau || '',
+            branches: Array.isArray(
+              formation.branches
+            )
               ? formation.branches
               : [],
             centreTitle,
@@ -258,18 +309,55 @@ router.get(
           trainees,
         };
 
-        const pdfBuffer = await generateFormationTraineesPdf(pdfData);
+        const out =
+          await generateFormationTraineesPdf(
+            pdfData
+          );
+
+        let pdfBuffer = out;
+
+        if (!Buffer.isBuffer(pdfBuffer)) {
+          try {
+            pdfBuffer =
+              Buffer.from(pdfBuffer);
+          } catch (conversionError) {
+            console.error(
+              'PDF BUFFER INVALID:',
+              {
+                formationId:
+                  String(formation._id),
+                formationName:
+                  formation.nom,
+                type:
+                  typeof out,
+                isBuffer:
+                  Buffer.isBuffer(out),
+              }
+            );
+
+            throw new Error(
+              `PDF invalide pour la formation ${formation.nom}`
+            );
+          }
+        }
 
         const safeFormationName =
-          sanitizeFileName(formation.nom) ||
+          sanitizeFileName(
+            formation.nom
+          ) ||
           `formation-${index + 1}`;
 
         const safeLevel =
-          sanitizeFileName(formation.niveau) ||
+          sanitizeFileName(
+            formation.niveau
+          ) ||
           'niveau';
 
         const pdfFileName =
-          `${String(index + 1).padStart(2, '0')}` +
+          `${String(index + 1).padStart(
+            2,
+            '0'
+          )}` +
           ` - ${safeFormationName}` +
           ` - ${safeLevel}.pdf`;
 
@@ -285,17 +373,23 @@ router.get(
         error
       );
 
+      /*
+       * Si archive.pipe(res) a déjà envoyé les headers,
+       * il ne faut surtout pas tenter res.status(...).json(...).
+       */
       if (!res.headersSent) {
         return res.status(500).json({
-          error: 'Erreur lors de la génération des listes de stagiaires',
+          error:
+            'Erreur lors de la génération des listes de stagiaires',
           details:
-            process.env.NODE_ENV === 'development'
+            process.env.NODE_ENV ===
+            'development'
               ? error.message
               : undefined,
         });
       }
 
-      res.destroy(error);
+      return res.end();
     }
   }
 );
