@@ -25,7 +25,8 @@ const adminEvaluationsRouter = require('../src/routes/adminEvaluations');
 const adminResultsRouter = require('../src/routes/adminResults');
 const adminDemandesRoutes = require('./routes/adminDemandes');
 const adminAffectationsRoutes = require('./routes/adminAffectations');
-const demandeRegion=require("./routes/demandeRegions")
+const demandeRegion=require("./routes/demandeRegions");
+const downloadDataRoutes = require('./routes/downloadData');
 
 
 const app = express();
@@ -55,6 +56,7 @@ app.use('/api/admin/evaluations', adminEvaluationsRouter);
 app.use('/api/admin/results', adminResultsRouter);
 app.use('/api/admin/demandes', adminDemandesRoutes);
 app.use('/api/admin/affectations', adminAffectationsRoutes);
+app.use('/api/download-data', downloadDataRoutes);
 app.use(
   '/static/signatures',
   express.static(path.join(__dirname, SIGNATURE_DIR))

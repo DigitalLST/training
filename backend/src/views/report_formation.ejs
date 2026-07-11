@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+
+  <style>
+    @page {
+      size: A4;
+      margin: 10mm 8mm 12mm 8mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      direction: rtl;
+      text-align: right;
+      font-family: "Amiri", Arial, sans-serif;
+      color: #1f2937;
+      background: #ffffff;
+    }
+
+    .header {
+      width: 100%;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .header-logo {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .header-logo img {
+      display: inline-block;
+      width: 110px;
+      height: auto;
+    }
+
+    .session-title {
+      margin: 0 0 4px;
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    .formation-title {
+      margin: 0 0 4px;
+      text-align: center;
+      font-size: 19px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    .centre-line {
+      margin: 0 0 3px;
+      text-align: center;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .period-line {
+      margin: 0;
+      text-align: center;
+      font-size: 14px;
+      color: #4b5563;
+      line-height: 1.5;
+    }
+
+    .training-info {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 9px;
+      font-size: 13px;
+    }
+
+    .training-info-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .training-info-label {
+      font-weight: 700;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      background: #f9fafb;
+      font-size: 11px;
+      line-height: 1.7;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .trainees-count {
+      font-size: 12px;
+      color: #4b5563;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      direction: rtl;
+      font-size: 11px;
+    }
+
+    thead {
+      display: table-header-group;
+    }
+
+    tr {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    th,
+    td {
+      border: 1px solid #9ca3af;
+      padding: 5px 4px;
+      text-align: center;
+      vertical-align: middle;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    th {
+      background: #f1f1f1;
+      font-weight: 700;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fafafa;
+    }
+
+    .col-index {
+      width: 6%;
+    }
+
+    .col-id-scout {
+      width: 17%;
+    }
+
+    .col-full-name {
+      width: 25%;
+    }
+
+    .col-region {
+      width: 18%;
+    }
+
+    .col-email {
+      width: 34%;
+    }
+
+    .email-cell {
+      direction: ltr;
+      text-align: center;
+      font-family: Arial, sans-serif;
+      font-size: 10px;
+    }
+
+    .empty-state {
+      width: 100%;
+      padding: 20px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #f9fafb;
+      text-align: center;
+      font-size: 14px;
+      color: #4b5563;
+    }
+  </style>
+</head>
+
+<body>
+  <header class="header">
+
+    <% if (logoDataUrl) { %>
+      <div class="header-logo">
+        <img
+          src="<%= logoDataUrl %>"
+          alt="Logo"
+        />
+      </div>
+    <% } %>
+
+    <div class="session-title">
+      <%= sessionTitle || 'الدورة التدريبية' %>
+    </div>
+
+    <div class="formation-title">
+      <%= formationTitle || 'الدراسة التدريبية' %>
+    </div>
+
+    <% if (centreLine) { %>
+      <div class="centre-line">
+        <%= centreLine %>
+      </div>
+    <% } %>
+
+    <% if (periodLine) { %>
+      <div class="period-line">
+        <%= periodLine %>
+      </div>
+    <% } %>
+
+    <% if (trainingLevel || (branches && branches.length)) { %>
+      <div class="training-info">
+
+        <% if (trainingLevel) { %>
+          <div class="training-info-item">
+            <span class="training-info-label">
+              المستوى التدريبي:
+            </span>
+
+            <span class="badge">
+              <%= trainingLevel %>
+            </span>
+          </div>
+        <% } %>
+
+        <% if (branches && branches.length) { %>
+          <div class="training-info-item">
+            <span class="training-info-label">
+              الأقسام:
+            </span>
+
+            <% branches.forEach(branch => { %>
+              <span class="badge">
+                <%= branch %>
+              </span>
+            <% }) %>
+          </div>
+        <% } %>
+
+      </div>
+    <% } %>
+
+  </header>
+
+  <div class="section-header">
+    <h2 class="section-title">
+      قائمة المتدربين
+    </h2>
+
+    <div class="trainees-count">
+      العدد الجملي:
+      <strong><%= traineesCount || 0 %></strong>
+    </div>
+  </div>
+
+  <% if (trainees && trainees.length > 0) { %>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="col-index">
+            ع/ر
+          </th>
+
+          <th class="col-id-scout">
+            المعرف الكشفي
+          </th>
+
+          <th class="col-full-name">
+            الاسم واللقب
+          </th>
+
+          <th class="col-region">
+            الجهة
+          </th>
+
+          <th class="col-email">
+            البريد الإلكتروني
+          </th>
+        </tr>
+      </thead>
+
+      <tbody>
+        <% trainees.forEach((trainee, index) => { %>
+          <tr>
+            <td>
+              <%= index + 1 %>
+            </td>
+
+            <td>
+              <%= trainee.idScout || '—' %>
+            </td>
+
+            <td>
+              <%= trainee.prenom || '' %>
+              <%= trainee.nom || '' %>
+            </td>
+
+            <td>
+              <%= trainee.region || '—' %>
+            </td>
+
+            <td class="email-cell">
+              <%= trainee.email || '—' %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+
+  <% } else { %>
+
+    <div class="empty-state">
+      لا يوجد متدربون معينون بهذه الدراسة.
+    </div>
+
+  <% } %>
+</body>
+</html>

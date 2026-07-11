@@ -584,10 +584,179 @@ async function generateRegionResultsPdf(rawData) {
     await browser.close();
   }
 }
+async function generateFormationTraineesPdf(rawData) {
+  const templatePath = path.join(
+    __dirname,
+    '..',
+    'views',
+    'report_formation.ejs'
+  );
+
+  const data = JSON.parse(JSON.stringify(rawData || {}));
+
+  const session = data.session || {};
+  const formation = data.formation || {};
+
+  data.sessionTitle =
+    session.title ||
+    formation.sessionTitleSnapshot ||
+    'الدورة';
+
+  data.formationTitle =
+    formation.nom ||
+    'الدراسة التدريبية';
+
+  data.trainingLevel =
+    formation.niveau ||
+    '';
+
+  data.branches = Array.isArray(formation.branches)
+    ? formation.branches
+    : [];
+
+  const centreTitle =
+    formation.centreTitle ||
+    formation.centre?.title ||
+    '';
+
+  const centreRegion =
+    formation.centreRegion ||
+    formation.centre?.region ||
+    '';
+
+  data.centreLine = [
+    centreTitle,
+    centreRegion,
+  ]
+    .filter(Boolean)
+    .join(' - ');
+
+  const startDate = session.startDate
+    ? formatDateArLong(session.startDate)
+    : '';
+
+  const endDate = session.endDate
+    ? formatDateArLong(session.endDate)
+    : '';
+
+  if (startDate && endDate) {
+    data.periodLine = `من ${startDate} إلى ${endDate}`;
+  } else if (startDate) {
+    data.periodLine = `ابتداء من ${startDate}`;
+  } else if (endDate) {
+    data.periodLine = `إلى ${endDate}`;
+  } else {
+    data.periodLine = '';
+  }
+
+  data.trainees = (data.trainees || [])
+    .map((trainee) => ({
+      idScout: trainee.idScout || '',
+      prenom: trainee.prenom || '',
+      nom: trainee.nom || '',
+      email: trainee.email || '',
+      region: trainee.region || '',
+    }))
+    .sort((a, b) => {
+      const regionCompare = String(a.region || '').localeCompare(
+        String(b.region || ''),
+        'ar',
+        {
+          sensitivity: 'base',
+        }
+      );
+
+      if (regionCompare !== 0) {
+        return regionCompare;
+      }
+
+      const nomCompare = String(a.nom || '').localeCompare(
+        String(b.nom || ''),
+        'ar',
+        {
+          sensitivity: 'base',
+        }
+      );
+
+      if (nomCompare !== 0) {
+        return nomCompare;
+      }
+
+      return String(a.prenom || '').localeCompare(
+        String(b.prenom || ''),
+        'ar',
+        {
+          sensitivity: 'base',
+        }
+      );
+    });
+
+  data.traineesCount = data.trainees.length;
+
+  let logoDataUrl = null;
+
+  try {
+    const logoAbs = path.join(
+      __dirname,
+      '..',
+      'public',
+      'fonts',
+      'logo.png'
+    );
+
+    const logoBuffer = fs.readFileSync(logoAbs);
+
+    logoDataUrl =
+      'data:image/png;base64,' +
+      logoBuffer.toString('base64');
+  } catch (error) {
+    console.warn(
+      'Formation trainees PDF logo not found:',
+      error.message
+    );
+  }
+
+  data.logoDataUrl = logoDataUrl;
+
+  const html = await ejs.renderFile(
+    templatePath,
+    data,
+    {
+      async: true,
+    }
+  );
+
+  const browser = await launchBrowser();
+
+  try {
+    const page = await browser.newPage();
+
+    await page.setContent(html, {
+      waitUntil: 'networkidle0',
+    });
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      margin: {
+        top: '10mm',
+        bottom: '12mm',
+        left: '8mm',
+        right: '8mm',
+      },
+    });
+
+    return pdfBuffer;
+  } finally {
+    await browser.close();
+  }
+}
 
 module.exports = {
   generateFinalResultsPdf,
   generatePdfFromTemplate,
   generateRegionResultsPdf,
   buildRegionSessionApprovalTemplateData,
+  generateFormationTraineesPdf,
 };
