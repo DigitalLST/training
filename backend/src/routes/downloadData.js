@@ -159,13 +159,6 @@ router.get(
       );
 
       res.setHeader('Cache-Control', 'no-store, max-age=0');
-      if (!createArchiver) {
-  console.error('ARCHIVER EXPORT:', archiverModule);
-
-  return res.status(500).json({
-    error: 'Module ZIP indisponible',
-  });
-}
 
       const archive = ZipArchive('zip', {
         zlib: {
