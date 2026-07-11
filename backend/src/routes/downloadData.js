@@ -1,7 +1,21 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const archiver = require('archiver');
+
 const { param, validationResult } = require('express-validator');
+const archiverModule = require('archiver');
+
+const createArchiver =
+  typeof archiverModule === 'function'
+    ? archiverModule
+    : typeof archiverModule.default === 'function'
+      ? archiverModule.default
+      : null;
+
+if (!createArchiver) {
+  throw new Error(
+    `Export archiver invalide : ${Object.keys(archiverModule || {}).join(', ')}`
+  );
+}
 
 const requireAuth = require('../middlewares/auth');
 
@@ -156,8 +170,15 @@ router.get(
       );
 
       res.setHeader('Cache-Control', 'no-store, max-age=0');
+      if (!createArchiver) {
+  console.error('ARCHIVER EXPORT:', archiverModule);
 
-      const archive = archiver('zip', {
+  return res.status(500).json({
+    error: 'Module ZIP indisponible',
+  });
+}
+
+      const archive = createArchiver('zip', {
         zlib: {
           level: 9,
         },
