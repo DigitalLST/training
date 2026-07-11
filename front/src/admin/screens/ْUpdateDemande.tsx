@@ -17,12 +17,18 @@ type ApplicantSnapshot = {
 
 type DemandeRow = {
   _id: string;
+  sessionId?: string;
   sessionTitle?: string;
   trainingLevel: string;
   branche: string;
   statusRegion: Status;
   statusNational: Status;
   applicantSnapshot: ApplicantSnapshot;
+};
+
+type SessionOption = {
+  _id: string;
+  title: string;
 };
 
 type LocationState = {
@@ -45,6 +51,8 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
   const [ok, setOk] = React.useState<string | null>(null);
   const [demandes, setDemandes] = React.useState<DemandeRow[]>([]);
   const [openIds, setOpenIds] = React.useState<Record<string, boolean>>({});
+  const [sessions, setSessions] = React.useState<SessionOption[]>([]);
+  const [changeSessionIds, setChangeSessionIds] = React.useState<Record<string, boolean>>({});
 
   React.useEffect(() => {
     if (!userId) return;
@@ -54,8 +62,25 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
         setLoading(true);
         setErr(null);
 
-        const list: DemandeRow[] = await api(`/admin/demandes/users/${userId}`);
-        setDemandes(list || []);
+        const [list, sessionsList] = await Promise.all([
+          api(`/admin/demandes/users/${userId}`),
+          api(`/admin/demandes/sessions`),
+        ]);
+
+        setDemandes(
+          (list || []).map((d: any) => ({
+            ...d,
+            _id: String(d._id),
+            sessionId: d.sessionId ? String(d.sessionId) : '',
+          }))
+        );
+
+        setSessions(
+          (sessionsList || []).map((s: any) => ({
+            ...s,
+            _id: String(s._id),
+          }))
+        );
       } catch (e: any) {
         setErr(e?.message || 'تعذّر تحميل مطالب المشاركة');
       } finally {
@@ -71,6 +96,13 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     }));
   }
 
+  function toggleChangeSession(id: string) {
+    setChangeSessionIds(prev => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  }
+
   function changeField<K extends keyof DemandeRow>(
     demandeId: string,
     field: K,
@@ -78,6 +110,22 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
   ) {
     setDemandes(prev =>
       prev.map(d => (d._id === demandeId ? { ...d, [field]: value } : d))
+    );
+  }
+
+  function changeSession(demandeId: string, sessionId: string) {
+    const selectedSession = sessions.find(s => s._id === sessionId);
+
+    setDemandes(prev =>
+      prev.map(d =>
+        d._id === demandeId
+          ? {
+              ...d,
+              sessionId,
+              sessionTitle: selectedSession?.title || d.sessionTitle,
+            }
+          : d
+      )
     );
   }
 
@@ -116,6 +164,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
       const updated = await api(`/admin/demandes/${d._id}`, {
         method: 'PATCH',
         body: JSON.stringify({
+          sessionId: d.sessionId,
           trainingLevel: d.trainingLevel,
           branche: d.branche,
           statusRegion: d.statusRegion,
@@ -150,6 +199,10 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
             if (row._id === d._id) {
               return {
                 ...row,
+                sessionId: updatedDemande.sessionId
+                  ? String(updatedDemande.sessionId)
+                  : row.sessionId,
+                sessionTitle: updatedDemande.sessionTitle ?? row.sessionTitle,
                 trainingLevel:
                   updatedDemande.trainingLevel ?? row.trainingLevel,
                 branche: updatedDemande.branche ?? row.branche,
@@ -201,11 +254,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     <div dir="rtl" style={{ width: '90vw', marginInline: 20, paddingInline: 24 }}>
       <div style={styles.toolbar}>
         <div style={styles.toolbarRight}>
-          <button
-            type="button"
-            onClick={() => nav(-1)}
-            style={styles.circleRedBtn}
-          >
+          <button type="button" onClick={() => nav(-1)} style={styles.circleRedBtn}>
             ‹
           </button>
           <span style={styles.pageTitle}>
@@ -226,6 +275,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
         <div style={styles.cardsList}>
           {demandes.map(d => {
             const isOpen = openIds[d._id] ?? false;
+            const isChangeSessionOpen = changeSessionIds[d._id] ?? false;
 
             return (
               <div key={d._id} style={styles.demandeCard}>
@@ -388,6 +438,36 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                         </select>
                       </Field>
                     </div>
+
+                    <div style={styles.changeSessionBox}>
+                      <button
+                        type="button"
+                        onClick={() => toggleChangeSession(d._id)}
+                        style={styles.changeSessionBtn}
+                      >
+                        تغيير الدورة
+                      </button>
+
+                      {isChangeSessionOpen && (
+                        <div style={styles.changeSessionSelectBox}>
+                          <Field label="الدورة الجديدة">
+                            <select
+                              value={d.sessionId || ''}
+                              onChange={e => changeSession(d._id, e.target.value)}
+                              style={styles.selectFull}
+                            >
+                              <option value="">اختر الدورة</option>
+
+                              {sessions.map(s => (
+                                <option key={s._id} value={s._id}>
+                                  {s.title}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -404,7 +484,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
         <div style={styles.note}>
           ملاحظة: تعديل بيانات الاسم / اللقب / البريد / المعرف الكشفي / الجهة
           يحيّن بيانات العضو وكل مطالب المشاركة المرتبطة به. أما المستوى والقسم
-          والقرارات فهي خاصة بالمطلب الحالي فقط.
+          والقرارات وتغيير الدورة فهي خاصة بالمطلب الحالي فقط.
         </div>
       </div>
     </div>
@@ -562,6 +642,29 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
     gap: 8,
+  },
+
+  changeSessionBox: {
+    marginTop: 10,
+    display: 'grid',
+    gap: 8,
+    justifyItems: 'start',
+  },
+
+  changeSessionBtn: {
+    padding: '7px 14px',
+    borderRadius: 999,
+    border: '1px solid #d1d5db',
+    background: '#fff',
+    color: '#374151',
+    cursor: 'pointer',
+    fontWeight: 800,
+    fontSize: 12,
+  },
+
+  changeSessionSelectBox: {
+    width: '100%',
+    maxWidth: 360,
   },
 
   fieldBox: {

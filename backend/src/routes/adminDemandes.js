@@ -4,6 +4,7 @@ const { param, body, validationResult } = require('express-validator');
 const requireAuth = require('../middlewares/auth');
 const User = require('../models/user');
 const Demande = require('../models/demande');
+const TrainingSession = require('../models/session');
 
 const router = express.Router();
 
@@ -23,6 +24,33 @@ function ensureAdmin(req, res) {
   }
   return true;
 }
+/* ---------- GET /admin/demandes/sessions ---------- */
+
+router.get('/sessions', requireAuth, async (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+
+  try {
+    const sessions = await TrainingSession.find({})
+      .select('title startDate endDate organizer')
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+
+    return res.json(
+      sessions.map(s => ({
+        _id: s._id,
+        title: s.title || '',
+        startDate: s.startDate || null,
+        endDate: s.endDate || null,
+        organizer: s.organizer || '',
+      }))
+    );
+  } catch (err) {
+    console.error('GET /admin/demandes/sessions ERROR', err);
+    return res.status(500).json({
+      message: 'Erreur serveur lors de la lecture des sessions.',
+    });
+  }
+});
 
 /* ---------- GET /admin/demandes/users/:userId ---------- */
 
@@ -38,7 +66,9 @@ router.get(
     const { userId } = req.params;
 
     try {
-      const user = await User.findById(userId).select('_id prenom nom email idScout region');
+      const user = await User.findById(userId).select(
+        '_id prenom nom email idScout region'
+      );
 
       if (!user) {
         return res.status(404).json({ message: 'Utilisateur introuvable.' });
@@ -86,6 +116,7 @@ router.get(
  *    - update applicantSnapshot sur toutes les demandes du même applicant
  *
  * 2) Infos propres à la demande :
+ *    - session
  *    - trainingLevel
  *    - branche
  *    - statusRegion
@@ -99,6 +130,7 @@ router.patch(
   [
     param('id').isMongoId(),
 
+    body('sessionId').optional().isMongoId(),
     body('trainingLevel').optional().isString(),
     body('branche').optional().isString(),
     body('statusRegion').optional().isIn(['PENDING', 'APPROVED', 'REJECTED']),
@@ -126,6 +158,10 @@ router.patch(
       const demandeOnlyUpdate = {};
       const snapshotUpdate = {};
       const userUpdate = {};
+
+      if (req.body.sessionId !== undefined) {
+        demandeOnlyUpdate.session = req.body.sessionId;
+      }
 
       if (req.body.trainingLevel !== undefined) {
         demandeOnlyUpdate.trainingLevel = req.body.trainingLevel.trim();
