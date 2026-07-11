@@ -2,20 +2,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 
 const { param, validationResult } = require('express-validator');
-const archiverModule = require('archiver');
+const { ZipArchive } = require('archiver');
 
-const createArchiver =
-  typeof archiverModule === 'function'
-    ? archiverModule
-    : typeof archiverModule.default === 'function'
-      ? archiverModule.default
-      : null;
-
-if (!createArchiver) {
-  throw new Error(
-    `Export archiver invalide : ${Object.keys(archiverModule || {}).join(', ')}`
-  );
-}
 
 const requireAuth = require('../middlewares/auth');
 
@@ -26,6 +14,7 @@ const SessionAffectation = require('../models/affectation');
 const {
   generateFormationTraineesPdf,
 } = require('../services/pdf');
+const archiver = require('archiver');
 
 const router = express.Router();
 
@@ -178,7 +167,7 @@ router.get(
   });
 }
 
-      const archive = createArchiver('zip', {
+      const archive = ZipArchive('zip', {
         zlib: {
           level: 9,
         },
