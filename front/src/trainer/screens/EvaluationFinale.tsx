@@ -631,7 +631,7 @@ async function downloadResults(fid: string) {
           const showTrainerApproveBtn = isTrainer && allHaveDecision && !trainerButtonDisabled;
 
           // ✅ quand validé: on remplace par bouton téléchargement
-          const showDownloadBtn = isFinalValidated;
+          const showDownloadBtn = isFinalValidated && isDirector;
 
           const approvers = team.filter(m => m.hasApproved);
 
