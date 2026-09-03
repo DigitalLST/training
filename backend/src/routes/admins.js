@@ -1,9 +1,11 @@
+// routes/admins.js
 const express = require('express');
 const { param, body, validationResult } = require('express-validator');
 
 const requireAuth = require('../middlewares/auth');
 const User = require('../models/user');
-const Demande = require('../models/demande');
+const SignatoryMandate = require('../models/signatoryMandate');
+const { createMandate } = require('../services/signatoryMandates');
 
 const router = express.Router();
 
@@ -11,8 +13,12 @@ const router = express.Router();
 
 function bad(req, res) {
   const e = validationResult(req);
-  if (!e.isEmpty()) return res.status(400).json({ errors: e.array() });
-  return null;
+  if (!e.isEmpty()) {
+    console.error('Validation errors:', e.array());
+    res.status(400).json({ errors: e.array() });
+    return true;
+  }
+  return false;
 }
 
 function ensureAdmin(req, res) {
@@ -24,263 +30,373 @@ function ensureAdmin(req, res) {
   return true;
 }
 
-/* ---------- GET /admin/demandes/users/:userId ---------- */
+// adminAccess autorisés côté User
+function isValidAdminAccess(v) {
+  return ['simple', 'cn_president', 'cn_commissioner'].includes(v);
+}
 
-router.get(
-  '/users/:userId',
-  requireAuth,
-  [param('userId').isMongoId()],
-  async (req, res) => {
-    const e = bad(req, res);
-    if (e) return;
-    if (!ensureAdmin(req, res)) return;
+/* ---------- GET /admins ---------- */
+router.get('/', requireAuth, async (req, res) => {
+  if (!ensureAdmin(req, res)) return;
 
-    const { userId } = req.params;
+  try {
+    const admins = await User.find({ role: 'admin' })
+      .select('prenom nom email idScout region role adminAccess')
+      .lean();
 
-    try {
-      const user = await User.findById(userId).select(
-        '_id prenom nom email idScout region'
-      );
+    if (!admins.length) return res.json([]);
 
-      if (!user) {
-        return res.status(404).json({ message: 'Utilisateur introuvable.' });
-      }
+    const userIds = admins.map(a => a._id);
 
-      const demandes = await Demande.find({ applicant: userId })
-        .populate('session', 'title startDate endDate organizer')
-        .sort({ createdAt: -1 })
-        .lean();
+    const mandates = await SignatoryMandate.find({
+      user: { $in: userIds },
+      type: { $in: ['cn_president', 'cn_commissioner', 'regional_president'] },
+    })
+      .sort({ startDate: -1 })
+      .lean();
 
-      return res.json(
-        demandes.map(d => ({
-          _id: d._id,
-          sessionId: d.session?._id || '',
-          sessionTitle: d.session?.title || '',
-          startDate: d.session?.startDate || null,
-          endDate: d.session?.endDate || null,
-          organizer: d.session?.organizer || '',
-          trainingLevel: d.trainingLevel || '',
-          branche: d.branche || '',
-          statusRegion: d.statusRegion || 'PENDING',
-          statusNational: d.statusNational || 'PENDING',
-          applicantSnapshot: {
-            idScout: d.applicantSnapshot?.idScout || user.idScout || '',
-            firstName: d.applicantSnapshot?.firstName || user.prenom || '',
-            lastName: d.applicantSnapshot?.lastName || user.nom || '',
-            email: d.applicantSnapshot?.email || user.email || '',
-            region: d.applicantSnapshot?.region || user.region || '',
-          },
-        }))
-      );
-    } catch (err) {
-      console.error('GET /admin/demandes/users/:userId ERROR', err);
-      return res.status(500).json({
-        message: 'Erreur serveur lors de la lecture des demandes.',
+    const mandatesByUser = new Map();
+    for (const m of mandates) {
+      const uid = String(m.user);
+      if (!mandatesByUser.has(uid)) mandatesByUser.set(uid, []);
+      mandatesByUser.get(uid).push({
+        _id: m._id,
+        type: m.type,
+        region: m.region || null,
+        startDate: m.startDate,
+        endDate: m.endDate || null,
+        titleFr: m.titleFr || null,
+        titleEn: m.titleEn || null,
       });
     }
+
+const out = admins.map(a => {
+  const uid = String(a._id);
+  const userMandates = mandatesByUser.get(uid) || [];
+
+  // Mandats actifs (endDate null)
+  const activeMandates = userMandates.filter(m => !m.endDate);
+
+  // On part de la valeur stockée sur l'utilisateur
+  let effectiveAdminAccess = a.adminAccess || 'simple';
+
+  // Si l'accès est "simple" mais qu'on a un mandat national actif,
+  // on le dérive du mandat
+  if (effectiveAdminAccess === 'simple') {
+    const national = activeMandates.find(
+      m => m.type === 'cn_president' || m.type === 'cn_commissioner'
+    );
+    if (national) {
+      // 'cn_president' ou 'cn_commissioner'
+      effectiveAdminAccess = national.type;
+    }
   }
-);
 
-/* ---------- PATCH /admin/demandes/:id ----------
- * 2 niveaux d'update :
- * 1) applicantSnapshot :
- *    - update User
- *    - update applicantSnapshot sur toutes les demandes du même applicant
- *
- * 2) Infos propres à la demande :
- *    - session
- *    - trainingLevel
- *    - branche
- *    - statusRegion
- *    - statusNational
- *    => update uniquement sur la demande courante
- */
+  return {
+    _id: uid,
+    prenom: a.prenom || '',
+    nom: a.nom || '',
+    email: a.email || '',
+    idScout: a.idScout || '',
+    region: a.region || '',
+    role: a.role,
+    adminAccess: effectiveAdminAccess,  // <= on renvoie cette valeur calculée
+    mandates: userMandates,
+  };
+});
 
+
+    return res.json(out);
+  } catch (err) {
+    console.error('GET /admins ERROR', err);
+    return res
+      .status(500)
+      .json({ message: 'Erreur serveur lors de la lecture des administrateurs.' });
+  }
+});
+
+/* ---------- PATCH /admins/:id ---------- */
 router.patch(
   '/:id',
   requireAuth,
   [
     param('id').isMongoId(),
-
-    body('sessionId').optional().isMongoId(),
-    body('trainingLevel').optional().isString(),
-    body('branche').optional().isString(),
-    body('statusRegion').optional().isIn(['PENDING', 'APPROVED', 'REJECTED']),
-    body('statusNational').optional().isIn(['PENDING', 'APPROVED', 'REJECTED']),
-
-    body('applicantSnapshot').optional().isObject(),
-    body('applicantSnapshot.idScout').optional().isString(),
-    body('applicantSnapshot.firstName').optional().isString(),
-    body('applicantSnapshot.lastName').optional().isString(),
-    body('applicantSnapshot.email').optional().isEmail(),
-    body('applicantSnapshot.region').optional().isString(),
+    body('makeAdmin').optional().isBoolean(),
+    body('adminAccess').optional().isString(),
+    body('mandateStartDate').optional().isString(),
   ],
   async (req, res) => {
-    const e = bad(req, res);
-    if (e) return;
+    if (bad(req, res)) return;
     if (!ensureAdmin(req, res)) return;
 
+    const { id } = req.params;
+    let { makeAdmin, adminAccess, mandateStartDate } = req.body;
+
     try {
-      const demande = await Demande.findById(req.params.id);
-
-      if (!demande) {
-        return res.status(404).json({ message: 'Demande introuvable.' });
+      const user = await User.findById(id);
+      if (!user) {
+        return res.status(404).json({ message: 'Utilisateur introuvable.' });
       }
 
-      const demandeOnlyUpdate = {};
-      const snapshotUpdate = {};
-      const userUpdate = {};
-
-      if (req.body.sessionId !== undefined) {
-        demandeOnlyUpdate.session = req.body.sessionId;
+      if (typeof makeAdmin === 'undefined') {
+        makeAdmin = true;
       }
 
-      if (req.body.trainingLevel !== undefined) {
-        demandeOnlyUpdate.trainingLevel = req.body.trainingLevel.trim();
-      }
+      if (makeAdmin) {
+        user.role = 'admin';
 
-      if (req.body.branche !== undefined) {
-        demandeOnlyUpdate.branche = req.body.branche.trim();
-      }
-
-      if (req.body.statusRegion !== undefined) {
-        demandeOnlyUpdate.statusRegion = req.body.statusRegion;
-      }
-
-      if (req.body.statusNational !== undefined) {
-        demandeOnlyUpdate.statusNational = req.body.statusNational;
-      }
-
-      if (req.body.applicantSnapshot) {
-        const s = req.body.applicantSnapshot;
-
-        if (s.idScout !== undefined) {
-          const v = s.idScout.trim();
-          snapshotUpdate['applicantSnapshot.idScout'] = v;
-          userUpdate.idScout = v;
+        if (adminAccess && isValidAdminAccess(adminAccess)) {
+          user.adminAccess = adminAccess;
+        } else if (!user.adminAccess) {
+          user.adminAccess = 'simple';
         }
-
-        if (s.firstName !== undefined) {
-          const v = s.firstName.trim();
-          snapshotUpdate['applicantSnapshot.firstName'] = v;
-          userUpdate.prenom = v;
-        }
-
-        if (s.lastName !== undefined) {
-          const v = s.lastName.trim();
-          snapshotUpdate['applicantSnapshot.lastName'] = v;
-          userUpdate.nom = v;
-        }
-
-        if (s.email !== undefined) {
-          const v = s.email.trim().toLowerCase();
-          snapshotUpdate['applicantSnapshot.email'] = v;
-          userUpdate.email = v;
-        }
-
-        if (s.region !== undefined) {
-          const v = s.region.trim();
-          snapshotUpdate['applicantSnapshot.region'] = v;
-          userUpdate.region = v;
-        }
+      } else {
+        user.role = 'user';
+        user.adminAccess = undefined;
       }
 
-      if (Object.keys(userUpdate).length > 0) {
-        const user = await User.findByIdAndUpdate(
-          demande.applicant,
-          { $set: userUpdate },
-          { new: true, runValidators: true }
-        );
+      await user.save();
 
-        if (!user) {
-          return res.status(404).json({
-            message: 'Utilisateur lié à la demande introuvable.',
-          });
-        }
-      }
+      let newMandate = null;
 
-      if (Object.keys(snapshotUpdate).length > 0) {
-        await Demande.updateMany(
-          { applicant: demande.applicant },
-          { $set: snapshotUpdate },
-          { runValidators: true }
-        );
-      }
+      if (
+        makeAdmin &&
+        adminAccess &&
+        adminAccess !== 'simple' &&
+        mandateStartDate
+      ) {
+        const type =
+          adminAccess === 'cn_president'
+            ? 'cn_president'
+            : 'cn_commissioner';
 
-      if (Object.keys(demandeOnlyUpdate).length > 0) {
-        await Demande.findByIdAndUpdate(
-          req.params.id,
-          { $set: demandeOnlyUpdate },
-          { runValidators: true }
-        );
-      }
-
-      const updatedDemande = await Demande.findById(req.params.id)
-        .populate('session', 'title startDate endDate organizer')
-        .lean();
-
-      return res.json({
-        ok: true,
-        demande: {
-          _id: updatedDemande._id,
-          sessionId: updatedDemande.session?._id || '',
-          sessionTitle: updatedDemande.session?.title || '',
-          startDate: updatedDemande.session?.startDate || null,
-          endDate: updatedDemande.session?.endDate || null,
-          organizer: updatedDemande.session?.organizer || '',
-          trainingLevel: updatedDemande.trainingLevel || '',
-          branche: updatedDemande.branche || '',
-          statusRegion: updatedDemande.statusRegion || 'PENDING',
-          statusNational: updatedDemande.statusNational || 'PENDING',
-          applicantSnapshot: {
-            idScout: updatedDemande.applicantSnapshot?.idScout || '',
-            firstName: updatedDemande.applicantSnapshot?.firstName || '',
-            lastName: updatedDemande.applicantSnapshot?.lastName || '',
-            email: updatedDemande.applicantSnapshot?.email || '',
-            region: updatedDemande.applicantSnapshot?.region || '',
-          },
-        },
-      });
-    } catch (err) {
-      console.error('PATCH /admin/demandes/:id ERROR', err);
-
-      if (err.code === 11000) {
-        return res.status(409).json({
-          message: 'Email ou identifiant scout déjà utilisé.',
+        newMandate = await createMandate({
+          userId: user._id,
+          type,
+          startDate: mandateStartDate,
         });
       }
 
-      return res.status(500).json({
-        message: 'Erreur serveur lors de la mise à jour de la demande.',
+      const mandates = await SignatoryMandate.find({
+        user: user._id,
+        type: { $in: ['cn_president', 'cn_commissioner', 'regional_president'] },
+      })
+        .sort({ startDate: -1 })
+        .lean();
+
+      return res.json({
+        user: {
+          _id: user._id,
+          prenom: user.prenom,
+          nom: user.nom,
+          email: user.email,
+          idScout: user.idScout,
+          region: user.region,
+          role: user.role,
+          adminAccess: user.adminAccess || 'simple',
+        },
+        mandates: mandates.map(m => ({
+          _id: m._id,
+          type: m.type,
+          region: m.region || null,
+          startDate: m.startDate,
+          endDate: m.endDate || null,
+          titleFr: m.titleFr || null,
+          titleEn: m.titleEn || null,
+        })),
+        createdMandate: newMandate
+          ? {
+              _id: newMandate._id,
+              type: newMandate.type,
+              region: newMandate.region || null,
+              startDate: newMandate.startDate,
+              endDate: newMandate.endDate || null,
+              titleFr: newMandate.titleFr || null,
+              titleEn: newMandate.titleEn || null,
+            }
+          : null,
       });
+    } catch (err) {
+      console.error('PATCH /admins/:id ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la mise à jour de l’administrateur.' });
     }
   }
 );
 
-/* ---------- DELETE /admin/demandes/:id ---------- */
-
+/* ---------- DELETE /admins/:id ---------- */
 router.delete(
   '/:id',
   requireAuth,
   [param('id').isMongoId()],
   async (req, res) => {
-    const e = bad(req, res);
-    if (e) return;
+    if (bad(req, res)) return;
     if (!ensureAdmin(req, res)) return;
 
-    try {
-      const demande = await Demande.findByIdAndDelete(req.params.id);
+    const { id } = req.params;
 
-      if (!demande) {
-        return res.status(404).json({ message: 'Demande introuvable.' });
+    try {
+      const user = await User.findById(id);
+      if (!user) {
+        return res.status(404).json({ message: 'Utilisateur introuvable.' });
       }
 
-      return res.json({ ok: true });
-    } catch (err) {
-      console.error('DELETE /admin/demandes/:id ERROR', err);
-      return res.status(500).json({
-        message: 'Erreur serveur lors de la suppression de la demande.',
+      // 1) On enlève le rôle admin
+      user.role = 'user';
+      user.adminAccess = undefined;
+      await user.save();
+
+      // 2) On clôture tous ses mandats actifs (endDate: null)
+      const now = new Date();
+      await SignatoryMandate.updateMany(
+        { user: user._id, endDate: null },
+        { $set: { endDate: now } }
+      );
+
+      return res.json({
+        ok: true,
+        user: {
+          _id: user._id,
+          prenom: user.prenom,
+          nom: user.nom,
+          email: user.email,
+          idScout: user.idScout,
+          region: user.region,
+          role: user.role,
+          adminAccess: user.adminAccess || null,
+        },
       });
+    } catch (err) {
+      console.error('DELETE /admins/:id ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la suppression de l’administrateur.' });
+    }
+  }
+);
+
+/* ---------- POST /admins/:id/mandates ---------- */
+/**
+ * Création explicite d'un mandat signataire
+ * - Met automatiquement l'utilisateur en admin si ce n'est pas le cas
+ * - Met à jour adminAccess pour les mandats nationaux
+ */
+router.post(
+  '/:id/mandates',
+  requireAuth,
+  [
+    param('id').isMongoId(),
+  ],
+  async (req, res) => {
+    if (bad(req, res)) return;
+    if (!ensureAdmin(req, res)) return;
+
+    const { id } = req.params;
+    const { type, startDate, region, titleFr, titleEn } = req.body || {};
+
+    try {
+      // --- validation MANUELLE du body ---
+      const allowedTypes = ['cn_president', 'cn_commissioner', 'regional_president'];
+
+      if (!type || !allowedTypes.includes(type)) {
+        return res.status(400).json({
+          message: 'Type de mandat invalide. Valeurs autorisées: cn_president, cn_commissioner, regional_president.',
+        });
+      }
+
+      if (!startDate || typeof startDate !== 'string') {
+        return res.status(400).json({
+          message: 'La date de début du mandat (startDate) est obligatoire (format YYYY-MM-DD).',
+        });
+      }
+
+      if (type === 'regional_president' && !region) {
+        return res.status(400).json({
+          message: 'La région est obligatoire pour un mandat régional.',
+        });
+      }
+
+      const user = await User.findById(id);
+      if (!user) {
+        return res.status(404).json({ message: 'Utilisateur introuvable.' });
+      }
+
+      // 👉 Ton besoin : création de mandat = promotion auto en admin
+      if (user.role !== 'admin') {
+        user.role = 'admin';
+      }
+
+      // Mettre adminAccess en cohérence avec le type de mandat
+      if (type === 'cn_president') {
+        user.adminAccess = 'cn_president';
+      } else if (type === 'cn_commissioner') {
+        user.adminAccess = 'cn_commissioner';
+      } else {
+        // mandat régional → si pas encore de adminAccess, on met simple
+        if (!user.adminAccess) {
+          user.adminAccess = 'simple';
+        }
+      }
+
+      await user.save();
+
+      // Création / update de mandat via le service
+      const mandate = await createMandate({
+        userId: user._id,
+        type,
+        region: type === 'regional_president' ? region : undefined,
+        startDate, // string 'YYYY-MM-DD'
+      });
+
+      // On applique les titres FR/EN si fournis
+      if (titleFr || titleEn) {
+        if (titleFr) mandate.titleFr = titleFr;
+        if (titleEn) mandate.titleEn = titleEn;
+        await mandate.save();
+      }
+
+      const mandates = await SignatoryMandate.find({
+        user: user._id,
+      })
+        .sort({ startDate: -1 })
+        .lean();
+
+      return res.json({
+        user: {
+          _id: user._id,
+          prenom: user.prenom,
+          nom: user.nom,
+          email: user.email,
+          idScout: user.idScout,
+          region: user.region,
+          role: user.role,
+          adminAccess: user.adminAccess || 'simple',
+        },
+        createdMandate: {
+          _id: mandate._id,
+          type: mandate.type,
+          region: mandate.region || null,
+          startDate: mandate.startDate,
+          endDate: mandate.endDate || null,
+          titleFr: mandate.titleFr || null,
+          titleEn: mandate.titleEn || null,
+        },
+        mandates: mandates.map(m => ({
+          _id: m._id,
+          type: m.type,
+          region: m.region || null,
+          startDate: m.startDate,
+          endDate: m.endDate || null,
+          titleFr: m.titleFr || null,
+          titleEn: m.titleEn || null,
+        })),
+      });
+    } catch (err) {
+      console.error('POST /admins/:id/mandates ERROR', err);
+      return res
+        .status(500)
+        .json({ message: 'Erreur serveur lors de la création du mandat.' });
     }
   }
 );
