@@ -1,3 +1,4 @@
+// src/screens/trainer/Home.tsx (par ex.)
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/UseAuth';
@@ -6,10 +7,7 @@ import {
   isSessionCoach,
 } from '../../utils/role';
 
-type Visibility =
-  | 'coachOnly'
-  | 'directorOnly'
-  | undefined;
+type Visibility = 'allExceptCoach' | 'coachOnly' | 'directorOnly' | undefined;
 
 type Card = {
   label: string;
@@ -18,28 +16,11 @@ type Card = {
 };
 
 const CARDS: Card[] = [
-  {
-    label: 'قائمة المتدربين',
-    to: '/trainer/infostrainee',
-  },
-  {
-    label: 'تقييم المتدربين',
-    to: '/trainer/evaluationtrainee',
-  },
-  {
-    label: 'النتائج النهائية',
-    to: '/trainer/resultattrainee',
-  },
-  {
-    label: 'تقرير قائد الدورة',
-    to: '/trainer/directorreport',
-    visibleFor: 'directorOnly',
-  },
-  {
-    label: 'تقرير المرشد الفني',
-    to: '/trainer/coachreport',
-    visibleFor: 'coachOnly',
-  },
+  { label: 'قائمة المتدربين',   to: '/trainer/infostrainee',    visibleFor: 'allExceptCoach' },
+  { label: 'تقييم المتدربين',   to: '/trainer/evaluationtrainee', visibleFor: 'allExceptCoach' },
+  { label: 'النتائج النهائية', to: '/trainer/resultattrainee',  visibleFor: 'allExceptCoach' },
+  { label: 'تقرير قائد الدورة', to: '/trainer/directorreport',  visibleFor: 'directorOnly' },
+  { label: 'تقرير المرشد الفني', to: '/trainer/coachreport',    visibleFor: 'coachOnly' },
 ];
 
 export default function Home(): React.JSX.Element {
@@ -47,17 +28,18 @@ export default function Home(): React.JSX.Element {
 
   const isDirector = isSessionDirector(user);
   const isCoach = isSessionCoach(user);
+  // (assistant / trainer dispos si tu veux affiner encore plus tard)
 
   const canSeeCard = (card: Card): boolean => {
-    if (!user) return false;
+    if (!user) return false; // par sécurité
 
     switch (card.visibleFor) {
       case 'coachOnly':
         return isCoach;
-
       case 'directorOnly':
         return isDirector;
-
+      case 'allExceptCoach':
+        return !isCoach;
       default:
         return true;
     }
