@@ -5,6 +5,26 @@ import { api } from '../../api/api';
 
 const RED = '#e20514';
 
+const TRAINING_LEVELS = [
+  'تمهيدية',
+  'شارة خشبية',
+  'S1',
+  'S2',
+  'S3',
+  'الدراسة الابتدائية',
+];
+
+const BRANCHES = [
+  'رواد',
+  'جوالة',
+  'دليلات',
+  'كشافة',
+  'مرشدات',
+  'أشبال',
+  'زهرات',
+  'عصافير',
+];
+
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 type ApplicantSnapshot = {
@@ -49,11 +69,28 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [ok, setOk] = React.useState<string | null>(null);
+
   const [demandes, setDemandes] = React.useState<DemandeRow[]>([]);
   const [openIds, setOpenIds] = React.useState<Record<string, boolean>>({});
   const [sessions, setSessions] = React.useState<SessionOption[]>([]);
-  const [changeSessionIds, setChangeSessionIds] = React.useState<Record<string, boolean>>({});
+  const [changeSessionIds, setChangeSessionIds] = React.useState<
+    Record<string, boolean>
+  >({});
 
+  // ---------------------------------------------------------
+  // Création d'une nouvelle demande
+  // ---------------------------------------------------------
+  const [showCreateForm, setShowCreateForm] = React.useState(false);
+
+  const [newDemande, setNewDemande] = React.useState({
+    sessionId: '',
+    trainingLevel: '',
+    branche: '',
+  });
+
+  // ---------------------------------------------------------
+  // Chargement
+  // ---------------------------------------------------------
   React.useEffect(() => {
     if (!userId) return;
 
@@ -89,6 +126,9 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     })();
   }, [userId]);
 
+  // ---------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------
   function toggleDemande(id: string) {
     setOpenIds(prev => ({
       ...prev,
@@ -109,7 +149,14 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     value: DemandeRow[K]
   ) {
     setDemandes(prev =>
-      prev.map(d => (d._id === demandeId ? { ...d, [field]: value } : d))
+      prev.map(d =>
+        d._id === demandeId
+          ? {
+              ...d,
+              [field]: value,
+            }
+          : d
+      )
     );
   }
 
@@ -155,6 +202,74 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     return 'في الانتظار';
   }
 
+  // ---------------------------------------------------------
+  // Création d'une demande
+  // ---------------------------------------------------------
+  async function createDemande() {
+    if (!userId) {
+      setErr('معرف العضو غير موجود');
+      return;
+    }
+
+    if (!newDemande.sessionId) {
+      setErr('يجب اختيار الدورة');
+      return;
+    }
+
+    if (!newDemande.trainingLevel) {
+      setErr('يجب اختيار المستوى');
+      return;
+    }
+
+    if (!newDemande.branche) {
+      setErr('يجب اختيار القسم');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setErr(null);
+      setOk(null);
+
+      await api(`/demandes/admin/users/${userId}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: newDemande.sessionId,
+          trainingLevel: newDemande.trainingLevel,
+          branche: newDemande.branche,
+        }),
+      });
+
+      // Recharge les demandes après création
+      const list = await api(`/admin/demandes/users/${userId}`);
+
+      setDemandes(
+        (list || []).map((d: any) => ({
+          ...d,
+          _id: String(d._id),
+          sessionId: d.sessionId ? String(d.sessionId) : '',
+        }))
+      );
+
+      setNewDemande({
+        sessionId: '',
+        trainingLevel: '',
+        branche: '',
+      });
+
+      setShowCreateForm(false);
+
+      setOk('تمت إضافة مطلب المشاركة بنجاح');
+    } catch (e: any) {
+      setErr(e?.message || 'تعذّرت إضافة مطلب المشاركة');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // Sauvegarde demande existante
+  // ---------------------------------------------------------
   async function saveDemande(d: DemandeRow) {
     try {
       setLoading(true);
@@ -182,15 +297,19 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
               idScout:
                 updatedDemande.applicantSnapshot?.idScout ??
                 row.applicantSnapshot.idScout,
+
               firstName:
                 updatedDemande.applicantSnapshot?.firstName ??
                 row.applicantSnapshot.firstName,
+
               lastName:
                 updatedDemande.applicantSnapshot?.lastName ??
                 row.applicantSnapshot.lastName,
+
               email:
                 updatedDemande.applicantSnapshot?.email ??
                 row.applicantSnapshot.email,
+
               region:
                 updatedDemande.applicantSnapshot?.region ??
                 row.applicantSnapshot.region,
@@ -199,17 +318,26 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
             if (row._id === d._id) {
               return {
                 ...row,
+
                 sessionId: updatedDemande.sessionId
                   ? String(updatedDemande.sessionId)
                   : row.sessionId,
-                sessionTitle: updatedDemande.sessionTitle ?? row.sessionTitle,
+
+                sessionTitle:
+                  updatedDemande.sessionTitle ?? row.sessionTitle,
+
                 trainingLevel:
                   updatedDemande.trainingLevel ?? row.trainingLevel,
-                branche: updatedDemande.branche ?? row.branche,
+
+                branche:
+                  updatedDemande.branche ?? row.branche,
+
                 statusRegion:
                   updatedDemande.statusRegion ?? row.statusRegion,
+
                 statusNational:
                   updatedDemande.statusNational ?? row.statusNational,
+
                 applicantSnapshot: syncedSnapshot,
               };
             }
@@ -222,7 +350,9 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
         );
       }
 
-      setOk('تم حفظ مطلب المشاركة وتحيين بيانات العضو في كل المطالب');
+      setOk(
+        'تم حفظ مطلب المشاركة وتحيين بيانات العضو في كل المطالب'
+      );
     } catch (e: any) {
       setErr(e?.message || 'تعذّر حفظ مطلب المشاركة');
     } finally {
@@ -230,8 +360,14 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     }
   }
 
+  // ---------------------------------------------------------
+  // Suppression
+  // ---------------------------------------------------------
   async function deleteDemande(d: DemandeRow) {
-    const confirm = window.confirm('هل تريد فعلاً حذف مطلب المشاركة؟');
+    const confirm = window.confirm(
+      'هل تريد فعلاً حذف مطلب المشاركة؟'
+    );
+
     if (!confirm) return;
 
     try {
@@ -239,9 +375,14 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
       setErr(null);
       setOk(null);
 
-      await api(`/admin/demandes/${d._id}`, { method: 'DELETE' });
+      await api(`/admin/demandes/${d._id}`, {
+        method: 'DELETE',
+      });
 
-      setDemandes(prev => prev.filter(x => x._id !== d._id));
+      setDemandes(prev =>
+        prev.filter(x => x._id !== d._id)
+      );
+
       setOk('تم حذف مطلب المشاركة');
     } catch (e: any) {
       setErr(e?.message || 'تعذّر حذف مطلب المشاركة');
@@ -250,62 +391,280 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     }
   }
 
+  // ---------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------
   return (
-    <div dir="rtl" style={{ width: '90vw', marginInline: 20, paddingInline: 24 }}>
+    <div
+      dir="rtl"
+      style={{
+        width: '90vw',
+        marginInline: 20,
+        paddingInline: 24,
+      }}
+    >
+      {/* HEADER */}
       <div style={styles.toolbar}>
         <div style={styles.toolbarRight}>
-          <button type="button" onClick={() => nav(-1)} style={styles.circleRedBtn}>
+          <button
+            type="button"
+            onClick={() => nav(-1)}
+            style={styles.circleRedBtn}
+          >
             ‹
           </button>
+
           <span style={styles.pageTitle}>
-            تعديل مطالب المشاركة {userName || `(${userId})`}
+            تعديل مطالب المشاركة{' '}
+            {userName || `(${userId})`}
           </span>
         </div>
+
+        {/* BOUTON + */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowCreateForm(prev => !prev);
+            setErr(null);
+            setOk(null);
+          }}
+          style={styles.addCircleBtn}
+          title="إضافة مطلب مشاركة"
+        >
+          +
+        </button>
       </div>
 
       <div style={styles.redLine} />
 
-      {loading && <div style={{ color: '#6b7280' }}>… جارِ التحميل</div>}
-      {err && <div style={{ color: '#b91c1c', marginTop: 8 }}>❌ {err}</div>}
-      {ok && <div style={{ color: '#065f46', marginTop: 8 }}>✅ {ok}</div>}
+      {/* =====================================================
+          FORMULAIRE AJOUT DEMANDE
+      ====================================================== */}
+      {showCreateForm && (
+        <div style={styles.createBox}>
+          <div style={styles.createTitle}>
+            إضافة مطلب مشاركة
+          </div>
 
+          <div style={styles.createGrid}>
+            {/* SESSION */}
+            <Field label="الدورة">
+              <select
+                value={newDemande.sessionId}
+                onChange={e =>
+                  setNewDemande(prev => ({
+                    ...prev,
+                    sessionId: e.target.value,
+                  }))
+                }
+                style={styles.selectFull}
+              >
+                <option value="">
+                  اختر الدورة
+                </option>
+
+                {sessions.map(s => (
+                  <option
+                    key={s._id}
+                    value={s._id}
+                  >
+                    {s.title}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {/* TRAINING LEVEL */}
+            <Field label="المستوى">
+              <select
+                value={newDemande.trainingLevel}
+                onChange={e =>
+                  setNewDemande(prev => ({
+                    ...prev,
+                    trainingLevel: e.target.value,
+                  }))
+                }
+                style={styles.selectFull}
+              >
+                <option value="">
+                  اختر المستوى
+                </option>
+
+                {TRAINING_LEVELS.map(level => (
+                  <option
+                    key={level}
+                    value={level}
+                  >
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {/* BRANCHE */}
+            <Field label="القسم">
+              <select
+                value={newDemande.branche}
+                onChange={e =>
+                  setNewDemande(prev => ({
+                    ...prev,
+                    branche: e.target.value,
+                  }))
+                }
+                style={styles.selectFull}
+              >
+                <option value="">
+                  اختر القسم
+                </option>
+
+                {BRANCHES.map(branch => (
+                  <option
+                    key={branch}
+                    value={branch}
+                  >
+                    {branch}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {/* ACTIONS */}
+            <div style={styles.createActions}>
+              <button
+                type="button"
+                onClick={createDemande}
+                style={styles.actionBtnPrimary}
+                disabled={loading}
+              >
+                {loading
+                  ? 'جارِ الإضافة...'
+                  : 'إضافة المطلب'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(false);
+
+                  setNewDemande({
+                    sessionId: '',
+                    trainingLevel: '',
+                    branche: '',
+                  });
+
+                  setErr(null);
+                }}
+                style={styles.actionBtnGhost}
+                disabled={loading}
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MESSAGES */}
+      {loading && (
+        <div style={{ color: '#6b7280' }}>
+          … جارِ التحميل
+        </div>
+      )}
+
+      {err && (
+        <div
+          style={{
+            color: '#b91c1c',
+            marginTop: 8,
+          }}
+        >
+          ❌ {err}
+        </div>
+      )}
+
+      {ok && (
+        <div
+          style={{
+            color: '#065f46',
+            marginTop: 8,
+          }}
+        >
+          ✅ {ok}
+        </div>
+      )}
+
+      {/* =====================================================
+          LISTE DES DEMANDES
+      ====================================================== */}
       <div style={styles.mainCard}>
-        <div style={{ fontWeight: 800 }}>مطالب المشاركة</div>
+        <div style={{ fontWeight: 800 }}>
+          مطالب المشاركة
+        </div>
 
         <div style={styles.cardsList}>
           {demandes.map(d => {
-            const isOpen = openIds[d._id] ?? false;
-            const isChangeSessionOpen = changeSessionIds[d._id] ?? false;
+            const isOpen =
+              openIds[d._id] ?? false;
+
+            const isChangeSessionOpen =
+              changeSessionIds[d._id] ?? false;
 
             return (
-              <div key={d._id} style={styles.demandeCard}>
+              <div
+                key={d._id}
+                style={styles.demandeCard}
+              >
+                {/* HEADER CARTE */}
                 <div style={styles.cardHeader}>
                   <div style={styles.cardHeaderInfo}>
-                    <div style={styles.sessionTitle}>{d.sessionTitle || '—'}</div>
+                    <div style={styles.sessionTitle}>
+                      {d.sessionTitle || '—'}
+                    </div>
 
                     <div style={styles.sessionSubtitle}>
-                      {d.trainingLevel || '—'} — {d.branche || '—'}
+                      {d.trainingLevel || '—'} —{' '}
+                      {d.branche || '—'}
                     </div>
 
                     <div style={styles.statusLine}>
-                      <span>قرار الجهة: {labelStatus(d.statusRegion)}</span>
-                      <span>قرار الوطني: {labelStatus(d.statusNational)}</span>
+                      <span>
+                        قرار الجهة:{' '}
+                        {labelStatus(
+                          d.statusRegion
+                        )}
+                      </span>
+
+                      <span>
+                        قرار الوطني:{' '}
+                        {labelStatus(
+                          d.statusNational
+                        )}
+                      </span>
                     </div>
                   </div>
 
+                  {/* ACTIONS */}
                   <div style={styles.cardActions}>
                     <button
                       type="button"
-                      onClick={() => toggleDemande(d._id)}
+                      onClick={() =>
+                        toggleDemande(d._id)
+                      }
                       style={styles.toggleBtn}
                     >
-                      {isOpen ? '▲ إخفاء التفاصيل' : '▼ عرض التفاصيل'}
+                      {isOpen
+                        ? '▲ إخفاء التفاصيل'
+                        : '▼ عرض التفاصيل'}
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => saveDemande(d)}
-                      style={styles.actionBtnPrimary}
+                      onClick={() =>
+                        saveDemande(d)
+                      }
+                      style={
+                        styles.actionBtnPrimary
+                      }
                       disabled={loading}
                     >
                       حفظ
@@ -313,8 +672,12 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
 
                     <button
                       type="button"
-                      onClick={() => deleteDemande(d)}
-                      style={styles.actionBtnGhost}
+                      onClick={() =>
+                        deleteDemande(d)
+                      }
+                      style={
+                        styles.actionBtnGhost
+                      }
                       disabled={loading}
                     >
                       حذف
@@ -322,16 +685,27 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                   </div>
                 </div>
 
+                {/* DETAILS */}
                 {isOpen && (
                   <>
-                    <div style={styles.sectionTitle}>معطيات العضو</div>
+                    {/* USER */}
+                    <div style={styles.sectionTitle}>
+                      معطيات العضو
+                    </div>
 
                     <div style={styles.grid5}>
                       <Field label="الاسم">
                         <input
-                          value={d.applicantSnapshot?.firstName || ''}
+                          value={
+                            d.applicantSnapshot
+                              ?.firstName || ''
+                          }
                           onChange={e =>
-                            changeSnapshotField(d._id, 'firstName', e.target.value)
+                            changeSnapshotField(
+                              d._id,
+                              'firstName',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
@@ -339,9 +713,16 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
 
                       <Field label="اللقب">
                         <input
-                          value={d.applicantSnapshot?.lastName || ''}
+                          value={
+                            d.applicantSnapshot
+                              ?.lastName || ''
+                          }
                           onChange={e =>
-                            changeSnapshotField(d._id, 'lastName', e.target.value)
+                            changeSnapshotField(
+                              d._id,
+                              'lastName',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
@@ -350,9 +731,16 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                       <Field label="البريد">
                         <input
                           type="email"
-                          value={d.applicantSnapshot?.email || ''}
+                          value={
+                            d.applicantSnapshot
+                              ?.email || ''
+                          }
                           onChange={e =>
-                            changeSnapshotField(d._id, 'email', e.target.value)
+                            changeSnapshotField(
+                              d._id,
+                              'email',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
@@ -360,9 +748,16 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
 
                       <Field label="المعرف الكشفي">
                         <input
-                          value={d.applicantSnapshot?.idScout || ''}
+                          value={
+                            d.applicantSnapshot
+                              ?.idScout || ''
+                          }
                           onChange={e =>
-                            changeSnapshotField(d._id, 'idScout', e.target.value)
+                            changeSnapshotField(
+                              d._id,
+                              'idScout',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
@@ -370,23 +765,39 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
 
                       <Field label="الجهة">
                         <input
-                          value={d.applicantSnapshot?.region || ''}
+                          value={
+                            d.applicantSnapshot
+                              ?.region || ''
+                          }
                           onChange={e =>
-                            changeSnapshotField(d._id, 'region', e.target.value)
+                            changeSnapshotField(
+                              d._id,
+                              'region',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
                       </Field>
                     </div>
 
-                    <div style={styles.sectionTitle}>معطيات مطلب المشاركة</div>
+                    {/* DEMANDE */}
+                    <div style={styles.sectionTitle}>
+                      معطيات مطلب المشاركة
+                    </div>
 
                     <div style={styles.grid4}>
                       <Field label="المستوى">
                         <input
-                          value={d.trainingLevel || ''}
+                          value={
+                            d.trainingLevel || ''
+                          }
                           onChange={e =>
-                            changeField(d._id, 'trainingLevel', e.target.value)
+                            changeField(
+                              d._id,
+                              'trainingLevel',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
@@ -396,7 +807,11 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                         <input
                           value={d.branche || ''}
                           onChange={e =>
-                            changeField(d._id, 'branche', e.target.value)
+                            changeField(
+                              d._id,
+                              'branche',
+                              e.target.value
+                            )
                           }
                           style={styles.input}
                         />
@@ -409,14 +824,23 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                             changeField(
                               d._id,
                               'statusRegion',
-                              e.target.value as Status
+                              e.target
+                                .value as Status
                             )
                           }
                           style={styles.selectFull}
                         >
-                          <option value="PENDING">في الانتظار</option>
-                          <option value="APPROVED">مقبول</option>
-                          <option value="REJECTED">مرفوض</option>
+                          <option value="PENDING">
+                            في الانتظار
+                          </option>
+
+                          <option value="APPROVED">
+                            مقبول
+                          </option>
+
+                          <option value="REJECTED">
+                            مرفوض
+                          </option>
                         </select>
                       </Field>
 
@@ -427,39 +851,77 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                             changeField(
                               d._id,
                               'statusNational',
-                              e.target.value as Status
+                              e.target
+                                .value as Status
                             )
                           }
                           style={styles.selectFull}
                         >
-                          <option value="PENDING">في الانتظار</option>
-                          <option value="APPROVED">مقبول</option>
-                          <option value="REJECTED">مرفوض</option>
+                          <option value="PENDING">
+                            في الانتظار
+                          </option>
+
+                          <option value="APPROVED">
+                            مقبول
+                          </option>
+
+                          <option value="REJECTED">
+                            مرفوض
+                          </option>
                         </select>
                       </Field>
                     </div>
 
-                    <div style={styles.changeSessionBox}>
+                    {/* CHANGEMENT SESSION */}
+                    <div
+                      style={
+                        styles.changeSessionBox
+                      }
+                    >
                       <button
                         type="button"
-                        onClick={() => toggleChangeSession(d._id)}
-                        style={styles.changeSessionBtn}
+                        onClick={() =>
+                          toggleChangeSession(
+                            d._id
+                          )
+                        }
+                        style={
+                          styles.changeSessionBtn
+                        }
                       >
                         تغيير الدورة
                       </button>
 
                       {isChangeSessionOpen && (
-                        <div style={styles.changeSessionSelectBox}>
+                        <div
+                          style={
+                            styles.changeSessionSelectBox
+                          }
+                        >
                           <Field label="الدورة الجديدة">
                             <select
-                              value={d.sessionId || ''}
-                              onChange={e => changeSession(d._id, e.target.value)}
-                              style={styles.selectFull}
+                              value={
+                                d.sessionId || ''
+                              }
+                              onChange={e =>
+                                changeSession(
+                                  d._id,
+                                  e.target.value
+                                )
+                              }
+                              style={
+                                styles.selectFull
+                              }
                             >
-                              <option value="">اختر الدورة</option>
+                              <option value="">
+                                اختر الدورة
+                              </option>
 
                               {sessions.map(s => (
-                                <option key={s._id} value={s._id}>
+                                <option
+                                  key={s._id}
+                                  value={s._id}
+                                >
                                   {s.title}
                                 </option>
                               ))}
@@ -475,30 +937,52 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
           })}
 
           {demandes.length === 0 && (
-            <div style={{ padding: 10, textAlign: 'center', opacity: 0.7 }}>
+            <div
+              style={{
+                padding: 10,
+                textAlign: 'center',
+                opacity: 0.7,
+              }}
+            >
               لا توجد مطالب مشاركة لهذا العضو.
             </div>
           )}
         </div>
 
         <div style={styles.note}>
-          ملاحظة: تعديل بيانات الاسم / اللقب / البريد / المعرف الكشفي / الجهة
-          يحيّن بيانات العضو وكل مطالب المشاركة المرتبطة به. أما المستوى والقسم
-          والقرارات وتغيير الدورة فهي خاصة بالمطلب الحالي فقط.
+          ملاحظة: تعديل بيانات الاسم / اللقب / البريد /
+          المعرف الكشفي / الجهة يحيّن بيانات العضو وكل
+          مطالب المشاركة المرتبطة به. أما المستوى والقسم
+          والقرارات وتغيير الدورة فهي خاصة بالمطلب الحالي
+          فقط.
         </div>
       </div>
     </div>
   );
 }
 
-function Field(props: { label: string; children: React.ReactNode }) {
+// =========================================================
+// FIELD
+// =========================================================
+
+function Field(props: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div style={styles.fieldBox}>
-      <label style={styles.label}>{props.label}</label>
+      <label style={styles.label}>
+        {props.label}
+      </label>
+
       {props.children}
     </div>
   );
 }
+
+// =========================================================
+// STYLES
+// =========================================================
 
 const styles: Record<string, React.CSSProperties> = {
   toolbar: {
@@ -542,6 +1026,58 @@ const styles: Record<string, React.CSSProperties> = {
     placeItems: 'center',
     cursor: 'pointer',
     fontSize: 28,
+  },
+
+  // Bouton +
+  addCircleBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 999,
+    border: 'none',
+    background: RED,
+    color: '#fff',
+    display: 'grid',
+    placeItems: 'center',
+    cursor: 'pointer',
+    fontSize: 30,
+    fontWeight: 400,
+    lineHeight: 1,
+  },
+
+  // Bloc création
+  createBox: {
+    width: '100%',
+    maxWidth: 1400,
+    boxSizing: 'border-box',
+    background: '#fff',
+    border: `1px solid ${RED}`,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 10,
+    marginBottom: 10,
+    boxShadow: '0 8px 20px rgba(0,0,0,.05)',
+  },
+
+  createTitle: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: '#1f2937',
+    marginBottom: 12,
+  },
+
+  createGrid: {
+    display: 'grid',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: 12,
+    alignItems: 'end',
+  },
+
+  createActions: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'center',
+    minHeight: 36,
   },
 
   mainCard: {
@@ -634,13 +1170,15 @@ const styles: Record<string, React.CSSProperties> = {
 
   grid5: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(160px, 1fr))',
     gap: 8,
   },
 
   grid4: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(160px, 1fr))',
     gap: 8,
   },
 

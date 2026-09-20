@@ -826,5 +826,218 @@ router.post('/regional/resync-page', requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+/* ---------- Création admin d'une demande pour un user ----------
+   POST /api/demandes/admin/users/:userId
+
+   body:
+   {
+     sessionId,
+     trainingLevel,
+     branche
+   }
+
+   => statusRegion   = APPROVED
+   => statusNational = APPROVED
+--------------------------------------------------------------- */
+router.post('/admin/users/:userId', requireAuth, async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { sessionId, trainingLevel, branche } = req.body || {};
+
+    // uniquement national/admin
+    if (!isNationalUserFromUser(req.user)) {
+      return res.status(403).json({
+        error: 'Forbidden (national/admin only)',
+      });
+    }
+
+    if (!isValidId(userId)) {
+      return res.status(400).json({ error: 'Invalid userId' });
+    }
+
+    if (!isValidId(sessionId)) {
+      return res.status(400).json({ error: 'Invalid sessionId' });
+    }
+
+    if (!ALLOWED_LEVELS.has(trainingLevel)) {
+      return res.status(400).json({
+        error: 'Invalid trainingLevel',
+      });
+    }
+
+    if (!ALLOWED_BRANCH.has(branche)) {
+      return res.status(400).json({
+        error: 'Invalid branche',
+      });
+    }
+
+    /*
+     * User cible
+     */
+    const u = await User.findById(userId).lean();
+
+    if (!u) {
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    /*
+     * Session
+     */
+    const s = await Session.findById(sessionId)
+      .select(
+        'title trainingLevels branche organizer organizerRegion organizerName startDate endDate'
+      )
+      .lean();
+
+    if (!s) {
+      return res.status(404).json({
+        error: 'Session not found',
+      });
+    }
+
+    /*
+     * Vérifier que le niveau existe dans cette session
+     */
+    if (
+      !Array.isArray(s.trainingLevels) ||
+      !s.trainingLevels.includes(trainingLevel)
+    ) {
+      return res.status(400).json({
+        error: 'trainingLevel not available for this session',
+      });
+    }
+
+    /*
+     * Vérifier que la branche existe dans cette session
+     */
+    if (
+      !Array.isArray(s.branche) ||
+      !s.branche.includes(branche)
+    ) {
+      return res.status(400).json({
+        error: 'branche not available for this session',
+      });
+    }
+
+    /*
+     * Vérification demande déjà existante
+     */
+    const existing = await Demande.findOne({
+      session: sessionId,
+      applicant: userId,
+    })
+      .select('_id statusRegion statusNational')
+      .lean();
+
+    if (existing) {
+      return res.status(409).json({
+        error: 'Demande déjà existante pour cette session',
+        demande: existing,
+      });
+    }
+
+    /*
+     * Snapshot user
+     */
+    const prenom =
+      u.prenom ||
+      u.firstName ||
+      u.firstname ||
+      '';
+
+    const nom =
+      u.nom ||
+      u.lastName ||
+      u.lastname ||
+      '';
+
+    const idScout =
+      u.idScout ||
+      u.scoutId ||
+      u.idKachefa ||
+      u.kachefaId ||
+      '';
+
+    /*
+     * Synchronisation éventuelle des certifications
+     */
+    let certifsSnapshot = [];
+
+    try {
+      if (
+        idScout &&
+        /^\d{10}$/.test(String(idScout))
+      ) {
+        certifsSnapshot =
+          await fetchCertifsByIdKachefa(String(idScout));
+      }
+    } catch (e) {
+      console.error(
+        '[admin demande][e-training sync] failed:',
+        e.message
+      );
+
+      certifsSnapshot = [];
+    }
+
+    /*
+     * Création
+     *
+     * IMPORTANT :
+     * demande créée par le national =>
+     * directement approuvée région + national.
+     */
+    const doc = await Demande.create({
+      session: sessionId,
+
+      applicant: userId,
+
+      applicantSnapshot: {
+        idScout: String(idScout || ''),
+        firstName: prenom,
+        lastName: nom,
+        email: u.email || '',
+        region: u.region || '',
+      },
+
+      certifsSnapshot,
+
+      trainingLevel,
+      branche,
+
+      statusRegion: 'APPROVED',
+      statusNational: 'APPROVED',
+    });
+
+    return res.status(201).json({
+      ok: true,
+
+      demande: {
+        _id: doc._id,
+
+        session: doc.session,
+        applicant: doc.applicant,
+
+        trainingLevel: doc.trainingLevel,
+        branche: doc.branche,
+
+        statusRegion: doc.statusRegion,
+        statusNational: doc.statusNational,
+
+        certifsSnapshot: doc.certifsSnapshot,
+      },
+    });
+  } catch (err) {
+    if (err?.code === 11000) {
+      return res.status(409).json({
+        error: 'Demande déjà existante pour cette session',
+      });
+    }
+
+    next(err);
+  }
+});
 
 module.exports = router;
