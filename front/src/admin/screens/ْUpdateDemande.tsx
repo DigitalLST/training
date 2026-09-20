@@ -49,6 +49,7 @@ type DemandeRow = {
 type SessionOption = {
   _id: string;
   title: string;
+  organizer?: string;
 };
 
 type LocationState = {
@@ -116,6 +117,8 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
           (sessionsList || []).map((s: any) => ({
             ...s,
             _id: String(s._id),
+            title: s.title || '',
+            organizer: s.organizer || '',
           }))
         );
       } catch (e: any) {
@@ -200,6 +203,14 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
     if (s === 'APPROVED') return 'مقبول';
     if (s === 'REJECTED') return 'مرفوض';
     return 'في الانتظار';
+  }
+
+  function sessionLabel(s: SessionOption) {
+    if (s.organizer) {
+      return `${s.title} — ${s.organizer}`;
+    }
+
+    return s.title;
   }
 
   // ---------------------------------------------------------
@@ -468,7 +479,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                     key={s._id}
                     value={s._id}
                   >
-                    {s.title}
+                    {sessionLabel(s)}
                   </option>
                 ))}
               </select>
@@ -824,8 +835,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                             changeField(
                               d._id,
                               'statusRegion',
-                              e.target
-                                .value as Status
+                              e.target.value as Status
                             )
                           }
                           style={styles.selectFull}
@@ -851,8 +861,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                             changeField(
                               d._id,
                               'statusNational',
-                              e.target
-                                .value as Status
+                              e.target.value as Status
                             )
                           }
                           style={styles.selectFull}
@@ -922,7 +931,7 @@ export default function AdminUpdateDemandes(): React.JSX.Element {
                                   key={s._id}
                                   value={s._id}
                                 >
-                                  {s.title}
+                                  {sessionLabel(s)}
                                 </option>
                               ))}
                             </select>
@@ -1028,7 +1037,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 28,
   },
 
-  // Bouton +
   addCircleBtn: {
     width: 46,
     height: 46,
@@ -1044,7 +1052,6 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
   },
 
-  // Bloc création
   createBox: {
     width: '100%',
     maxWidth: 1400,
