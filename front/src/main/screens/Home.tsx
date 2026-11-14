@@ -1,7 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/UseAuth'
-import WhatsAppPhoneFields from '../../components/WhatsAppPhoneFields'
 
 const RED = '#e20514'
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api'
@@ -28,8 +27,6 @@ export default function PublicHome(): React.JSX.Element {
   const [region,      setRegion]      = React.useState('')
   const [pwd1,      setPwd1]      = React.useState('')
   const [pwd2,      setPwd2]      = React.useState('')
-  const [countryCode, setCountryCode] = React.useState('+216')
-  const [phoneNumber, setPhoneNumber] = React.useState('')
 
 
 async function onLogin(e: React.FormEvent<HTMLFormElement>) {
@@ -67,20 +64,7 @@ async function onRegister(e: React.FormEvent) {
 
   const reg = (region || '').trim();
   if (!reg) return setErr('الجهة إجبارية');
-  const digits = phoneNumber.replace(/\D/g, '');
-  if (!digits) {
-  return setErr('رقم واتساب إجباري');
-}
-  if (countryCode === '+216' && !/^\d{8}$/.test(digits)) {
-  return setErr('رقم الهاتف التونسي يجب أن يتكون من 8 أرقام');
-}
-  if (
-  countryCode === '+33' &&
-  !/^(?:0?[1-9]\d{8})$/.test(digits)
-) {
-  return setErr('رقم الهاتف الفرنسي غير صالح');
-}
-  
+
   try {
     setLoading(true);
 
@@ -89,16 +73,14 @@ async function onRegister(e: React.FormEvent) {
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
       body: JSON.stringify({
-  prenom: firstName.trim(),
-  nom: lastName.trim(),
-  email: email.trim(),
-  password: pwd1,
-  idScout: sid,
-  region: reg,
-  niveau: niv,
-  countryCode,
-  phoneNumber: phoneNumber.trim()
-}),
+        prenom:   firstName.trim(),
+        nom:      lastName.trim(),
+        email:    email.trim(),
+        password: pwd1,
+        idScout:  sid,        // requis (10 chiffres)
+        region:   reg,        // requis
+        niveau:   niv,        // requis (provient de select "role")
+      }),
     });
 
     // Conflit (email/idScout déjà utilisé)
@@ -272,7 +254,6 @@ async function onRegister(e: React.FormEvent) {
               </div> 
 
 
-              <WhatsAppPhoneFields countryCode={countryCode} phoneNumber={phoneNumber} onCountryCodeChange={setCountryCode} onPhoneNumberChange={setPhoneNumber} />
               <div style={{ display:'flex', gap:14 }}>
                 <div>
                   <label style={styles.label}>كلمة السر</label>
