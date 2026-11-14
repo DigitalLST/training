@@ -1,5 +1,6 @@
 // src/App.tsx
 import { Routes, Route } from 'react-router-dom';
+import WhatsAppGate from './components/WhatsAppGate';
 import RequireAuth from './guards/RequireAuth';
 import ProtectedSection from './components/ProtectedSection';
 import MainLayout from './layouts/Main';
@@ -66,6 +67,7 @@ import ResultatSession from './region/screens/ResultatSession';
 
 export default function App() {
   return (
+    <WhatsAppGate>
     <Routes>
       {/* ---------- Public ---------- */}
       <Route path="/" element={<PublicLayout />}>
@@ -232,5 +234,6 @@ export default function App() {
         </Route> 
       </Route>  
     </Routes>
+    </WhatsAppGate>
   );
 }
