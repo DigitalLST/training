@@ -1,6 +1,8 @@
 // src/screens/UpdateAccount.tsx
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import WhatsAppPhoneFields from '../../components/WhatsAppPhoneFields';
+import { useAuth } from '../../contexts/UseAuth';
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 const RED = '#e20514';
@@ -12,10 +14,17 @@ type Me = {
   idScout?: string;        // المعرف الكشفي
   prenom?: string;         // الاسم
   nom?: string;            // اللقب
+  whatsapp?: string;
 };
 
 export default function UpdateAccount(): React.JSX.Element {
   const nav = useNavigate();
+  const { refreshMe } = useAuth();
+  const [countryCode, setCountryCode] = React.useState('+216');
+  const [phoneNumber, setPhoneNumber] = React.useState('');
+  const [savingWhatsApp, setSavingWhatsApp] = React.useState(false);
+  const [whatsAppError, setWhatsAppError] = React.useState<string | null>(null);
+  const [whatsAppSuccess, setWhatsAppSuccess] = React.useState<string | null>(null);
 
   // lecture infos utilisateur (affichage en lecture seule)
   const [me, setMe] = React.useState<Me | null>(null);
@@ -52,6 +61,7 @@ export default function UpdateAccount(): React.JSX.Element {
           idScout: String(payload?.idScout),
           prenom: String(payload?.prenom || payload?.firstName || ''),
           nom: String(payload?.nom || payload?.lastName || ''),
+          whatsapp: String(payload?.whatsapp || payload?.user?.whatsapp || ''),
         };
         setMe(m);
       } catch (e: any) {
@@ -61,6 +71,52 @@ export default function UpdateAccount(): React.JSX.Element {
       }
     })();
   }, [headers]);
+
+  async function onSaveWhatsApp(e: React.FormEvent) {
+    e.preventDefault();
+    if (savingWhatsApp) return;
+    setWhatsAppError(null);
+    setWhatsAppSuccess(null);
+
+    const local = phoneNumber.replace(/[\s().-]/g, '');
+    if (!/^\d+$/.test(local)) {
+      setWhatsAppError('يرجى إدخال رقم واتساب صالح');
+      return;
+    }
+    if (countryCode === '+216' && !/^\d{8}$/.test(local)) {
+      setWhatsAppError('رقم الهاتف التونسي يجب أن يتكون من 8 أرقام');
+      return;
+    }
+    if (countryCode === '+33' && !/^(?:0?[1-9]\d{8})$/.test(local)) {
+      setWhatsAppError('رقم الهاتف الفرنسي غير صالح');
+      return;
+    }
+
+    try {
+      setSavingWhatsApp(true);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE}/users/me/whatsapp`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        cache: 'no-store',
+        body: JSON.stringify({ countryCode, phoneNumber: local }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      const updated = String(data?.whatsapp || data?.user?.whatsapp || '');
+      setMe(prev => prev ? { ...prev, whatsapp: updated } : prev);
+      setPhoneNumber('');
+      setWhatsAppSuccess('تم تحديث رقم واتساب بنجاح');
+      await refreshMe().catch(() => {});
+    } catch (error: any) {
+      setWhatsAppError(error?.message || 'تعذر تحديث رقم واتساب');
+    } finally {
+      setSavingWhatsApp(false);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -104,6 +160,30 @@ export default function UpdateAccount(): React.JSX.Element {
         {loading && <div style={{ color:'#6b7280', marginBottom:12 }}>… جاري التحميل</div>}
         {err && <div style={{ color:'#b91c1c', marginBottom:12 }}>❌ {err}</div>}
         
+        {/* قسم واتساب: نفس تنسيق الحقول والأزرار الأصلية */}
+        <form onSubmit={onSaveWhatsApp} style={{ ...styles.form, marginBottom: 20 }}>
+          <div style={{ gridColumn: '1 / span 2', fontWeight: 800, color: '#1f2937', fontSize: 18 }}>
+            تغيير رقم واتساب
+          </div>
+          <label style={{ ...styles.label, gridColumn: '1 / span 2' }}>
+            <span>رقم واتساب الحالي</span>
+            <input dir="ltr" style={{ ...styles.inputRO, textAlign: 'left' }} value={me?.whatsapp || '—'} readOnly disabled />
+          </label>
+          <div style={{ gridColumn: '1 / span 2' }}>
+            <WhatsAppPhoneFields
+              countryCode={countryCode}
+              phoneNumber={phoneNumber}
+              onCountryCodeChange={setCountryCode}
+              onPhoneNumberChange={setPhoneNumber}
+            />
+          </div>
+          {whatsAppError && <div style={{ gridColumn: '1 / span 2', color: '#b91c1c' }}>{whatsAppError}</div>}
+          {whatsAppSuccess && <div style={{ gridColumn: '1 / span 2', color: '#15803d' }}>{whatsAppSuccess}</div>}
+          <button type="submit" disabled={savingWhatsApp || loading} style={{ ...styles.primaryBtn, gridColumn: '1 / span 2' }}>
+            {savingWhatsApp ? '… جاري التحديث' : 'حفظ رقم واتساب'}
+          </button>
+        </form>
+
         <form onSubmit={onSubmit} style={styles.form}>
 
           
