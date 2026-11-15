@@ -322,7 +322,7 @@ async function buildFinalResultsReportData(formationId) {
   })
     .populate({
       path: 'user',
-      select: 'prenom nom email idScout region signatureUrl',
+      select: 'prenom nom email idScout region signatureUrl whatsapp',
     })
     .lean();
 
@@ -340,13 +340,14 @@ async function buildFinalResultsReportData(formationId) {
       email: u.email || '',
       idScout: u.idScout || '',
       region: u.region || '',
+      whatsapp: u.whatsapp || '',
     });
   }
 
   const decisionsDocs = await FinalDecision.find({
     formation: formationId,
   })
-    .populate({ path: 'trainee', select: 'prenom nom email idScout region' })
+    .populate({ path: 'trainee', select: 'prenom nom email idScout region whatsapp' })
     .populate({ path: 'approvals.user', select: 'prenom nom' })
     .lean();
 
@@ -413,6 +414,7 @@ async function buildFinalResultsReportData(formationId) {
       nom: affect.nom || t.nom || '',
       region: affect.region || t.region || '',
       email: affect.email || t.email || '',
+      whatsapp: affect.whatsapp || t.whatsapp || '',
       totalNote: totals.totalNote,
       totalMax: totals.totalMax,
       pct: totals.pct,
@@ -627,6 +629,14 @@ async function buildSessionResultsReportData(sessionId) {
     .populate({ path: 'formation', select: 'nom niveau' })
     .lean();
 
+  const traineeIds = [...new Set(fds.map(fd => String(fd.trainee)))];
+  const traineeUsers = await User.find({ _id: { $in: traineeIds } })
+    .select('_id whatsapp')
+    .lean();
+  const whatsappByUserId = new Map(
+    traineeUsers.map(u => [String(u._id), u.whatsapp || ''])
+  );
+
   const trainees = [];
   for (const fd of fds) {
     const traineeId = String(fd.trainee);
@@ -640,6 +650,7 @@ async function buildSessionResultsReportData(sessionId) {
       nom: d.nom,
       region: d.region,
       branche: d.branche,
+      whatsapp: whatsappByUserId.get(traineeId) || '',
       trainingLevel: fd.formation?.niveau || '—',
       formationTitle: fd.formation?.nom || '—',
       decision: fd.decision || null,
@@ -674,7 +685,7 @@ async function buildRegionReportData(formationId) {
   }
 
   const affects = await SessionAffectation.find({ formation: formationId })
-    .populate({ path: 'user', select: 'prenom nom email idScout region' })
+    .populate({ path: 'user', select: 'prenom nom email idScout region whatsapp' })
     .lean();
 
   const team = affects
@@ -693,6 +704,7 @@ async function buildRegionReportData(formationId) {
       nom: a.user?.nom || '',
       region: a.user?.region || '',
       email: a.user?.email || '',
+      whatsapp: a.user?.whatsapp || '',
     }));
 
   return {

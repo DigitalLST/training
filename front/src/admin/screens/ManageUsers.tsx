@@ -12,6 +12,7 @@ type UserRow = {
   nom: string;
   email: string;
   idScout: string;
+  whatsapp?: string | null;
   niveau?: string;
   region?: string;
 };
@@ -57,6 +58,7 @@ export default function GestionUsers(): React.JSX.Element {
       const haystack =
         (u.prenom || '') + ' ' +
         (u.nom || '') + ' ' +
+        (u.whatsapp || '') + ' ' +
         (u.email || '') + ' ' +
         (u.idScout || '') + ' ' +
         (u.niveau || '') + ' ' +
@@ -96,11 +98,18 @@ export default function GestionUsers(): React.JSX.Element {
       setErr(null);
       setOk(null);
 
+      const whatsapp = String(editForm.whatsapp ?? u.whatsapp ?? '').trim();
+      if (whatsapp && !/^\+[1-9]\d{7,14}$/.test(whatsapp)) {
+        setErr('رقم الهاتف غير صالح. الرجاء إدخال الرقم بالصيغة الدولية مثل +216XXXXXXXX.');
+        return;
+      }
+
       const payload: Partial<UserRow> = {
         prenom: editForm.prenom ?? u.prenom,
         nom: editForm.nom ?? u.nom,
         email: editForm.email ?? u.email,
         idScout: editForm.idScout ?? u.idScout,
+        whatsapp: whatsapp || null,
         niveau: editForm.niveau ?? u.niveau,
         region: editForm.region ?? u.region,
       };
@@ -195,7 +204,7 @@ function goToUpdateAffectations(u: UserRow) {
           <label style={styles.label}>ابحث عن العضو</label>
           <input
             type="text"
-            placeholder=" البريد / المعرف الكشفي / الاسم / اللقب / الجهة / المستوى"
+            placeholder=" البريد / الهاتف / المعرف الكشفي / الاسم / اللقب / الجهة / المستوى"
             value={q}
             onChange={e => setQ(e.target.value)}
             style={styles.input}
@@ -209,6 +218,7 @@ function goToUpdateAffectations(u: UserRow) {
               <tr>
                 <th style={styles.th}>الاسم</th>
                 <th style={styles.th}>اللقب</th>
+                <th style={styles.th}>رقم الهاتف</th>
                 <th style={styles.th}>البريد الإلكتروني</th>
                 <th style={styles.th}>المعرف الكشفي</th>
                 <th style={styles.th}>المستوى التدريبي</th>
@@ -249,6 +259,22 @@ function goToUpdateAffectations(u: UserRow) {
                         />
                       ) : (
                         <span>{u.nom}</span>
+                      )}
+                    </td>
+
+                    {/* numéro WhatsApp */}
+                    <td style={{ ...styles.td, direction: 'ltr' }}>
+                      {isEditing ? (
+                        <input
+                          type="tel"
+                          dir="ltr"
+                          placeholder="+216XXXXXXXX"
+                          style={styles.cellInput}
+                          value={rowVal('whatsapp')}
+                          onChange={e => onEditChange('whatsapp', e.target.value)}
+                        />
+                      ) : (
+                        <span dir="ltr">{u.whatsapp || '—'}</span>
                       )}
                     </td>
 
@@ -367,7 +393,7 @@ function goToUpdateAffectations(u: UserRow) {
 
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: 10, textAlign: 'center', opacity: 0.7 }}>
+                  <td colSpan={8} style={{ padding: 10, textAlign: 'center', opacity: 0.7 }}>
                     لا توجد نتائج مطابقة
                   </td>
                 </tr>

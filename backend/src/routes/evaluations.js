@@ -126,7 +126,7 @@ router.get(
         .select('_id user isPresent')
         .populate({
           path: 'user',
-          select: '_id prenom nom email idScout region phone',
+          select: '_id prenom nom email idScout region whatsapp',
         })
         .lean();
 
@@ -188,7 +188,7 @@ router.get(
             email: a.user.email,
             idScout: a.user.idScout,
             region: a.user.region || null,
-            phone: a.user.phone || null,
+            whatsapp: a.user.whatsapp || null,
           },
           evaluation: ev
             ? {

@@ -62,7 +62,7 @@ type EvaluationTraineeRow = {
     email?: string;
     idScout?: string;
     region?: string;
-    phone?: string;
+    whatsapp?: string | null;
     certifsSnapshot?: CertifLite[];
   } | null;
   evaluation: EvaluationLite | null;
@@ -75,7 +75,7 @@ type TraineeUser = {
   email?: string;
   idScout?: string;
   region?: string;
-  phone?: string;
+  whatsapp?: string | null;
   certifsSnapshot?: CertifLite[];
   affectationId: string;
   isPresent?: boolean;
@@ -310,7 +310,7 @@ export default function EvaluationFinale(): React.JSX.Element {
           email: a.trainee!.email,
           idScout: a.trainee!.idScout,
           region: a.trainee!.region,
-          phone: (a.trainee as any)?.phone,
+          whatsapp: a.trainee!.whatsapp,
           certifsSnapshot: a.trainee!.certifsSnapshot || [],
           affectationId: a.affectationId,
           isPresent: a.isPresent,
@@ -688,6 +688,7 @@ async function downloadResults(fid: string) {
                             <tr>
                               <th style={styles.th}>المعرف الكشفي</th>
                               <th style={styles.th}>الاسم و اللقب</th>
+                              <th style={styles.th}>رقم الهاتف</th>
                               <th style={styles.th}>الجهة</th>
                               <th style={styles.th}>البريد الإلكتروني</th>
                               <th style={styles.th}>العلامة</th>
@@ -716,6 +717,7 @@ async function downloadResults(fid: string) {
                                   <td style={styles.td}>
                                     {t.prenom} {t.nom}
                                   </td>
+                                  <td style={styles.td}><span dir="ltr" style={{ unicodeBidi: 'isolate' }}>{t.whatsapp || '—'}</span></td>
                                   <td style={styles.td}>{t.region || '—'}</td>
                                   <td style={styles.td}>{t.email || '—'}</td>
                                   <td style={styles.td}>

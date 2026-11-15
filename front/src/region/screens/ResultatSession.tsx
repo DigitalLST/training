@@ -23,6 +23,7 @@ type SessionTraineeRow = {
   traineeId: string;
   idScout: string;
   fullName: string;
+  whatsapp?: string;
   email: string;
   formationName: string;
   decision?: string;
@@ -240,6 +241,7 @@ export default function ResultatSession(): React.JSX.Element {
                 fullName: `${String(trainee.prenom || '').trim()} ${String(
                   trainee.nom || ''
                 ).trim()}`.trim(),
+                whatsapp: String(trainee.whatsapp || ''),
                 email: String(trainee.email || ''),
                 formationName: String(formation.nom || ''),
                 decision: showDecision ? mapDecisionLabel(decisionRaw) : undefined,
@@ -366,6 +368,7 @@ export default function ResultatSession(): React.JSX.Element {
                               <tr>
                                 <th style={styles.th}>المعرف الكشفي</th>
                                 <th style={styles.th}>الاسم و اللقب</th>
+                                 <th style={styles.th}>رقم الهاتف</th>
                                 <th style={styles.th}>البريد الإلكتروني</th>
                                 <th style={styles.th}> الدراسة</th>
                                 {details.showDecision && (
@@ -378,6 +381,7 @@ export default function ResultatSession(): React.JSX.Element {
                                 <tr key={t.key}>
                                   <td style={styles.td}>{t.idScout || '—'}</td>
                                   <td style={styles.td}>{t.fullName || '—'}</td>
+                                   <td style={styles.td} dir="ltr">{t.whatsapp || '—'}</td>
                                   <td style={styles.td}>{t.email || '—'}</td>
                                   <td style={styles.td}>{t.formationName || '—'}</td>
                                   {details.showDecision && (

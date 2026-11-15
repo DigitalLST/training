@@ -32,6 +32,7 @@ type TraineeUser = {
   email?: string;
   idScout?: string;
   region?: string;
+  whatsapp?: string | null;
   certifsSnapshot?: CertifLite[];
   affectationId: string;       // 👈 id de l'affectation (SessionAffectation._id)
   isPresent?: boolean;         // 👈 flag présence
@@ -48,6 +49,7 @@ type AffectationRow = {
     email?: string;
     idScout?: string;
     region?: string;
+    whatsapp?: string | null;
     certifsSnapshot?: CertifLite[];
   } | null;
 };
@@ -165,6 +167,7 @@ export default function InfosTrainee(): React.JSX.Element {
           email: a.user!.email,
           idScout: a.user!.idScout,
           region: a.user!.region,
+          whatsapp: a.user!.whatsapp,
           certifsSnapshot: a.user!.certifsSnapshot || [],
           affectationId: a._id,
           isPresent: a.isPresent ?? false,
@@ -432,6 +435,7 @@ async function onRefreshCertifs(f: FormationLite) {
                                 <th style={styles.th}>#</th>
                                 <th style={styles.th}>المعرف الكشفي</th>
                                 <th style={styles.th}>الاسم و اللقب</th>
+                                <th style={styles.th}>رقم الهاتف</th>
                                 <th style={styles.th}>الجهة</th>
                                 <th style={styles.th}>البريد الإلكتروني</th>
                                 <th style={styles.th}>الحضور</th>
@@ -453,6 +457,9 @@ async function onRefreshCertifs(f: FormationLite) {
                                     <td style={styles.td}>{u.idScout || '—'}</td>
                                     <td style={styles.td}>
                                       {u.prenom} {u.nom}
+                                    </td>
+                                    <td style={{ ...styles.td, direction: 'ltr', textAlign: 'right' }}>
+                                      {u.whatsapp || '—'}
                                     </td>
                                     <td style={styles.td}>{u.region || '—'}</td>
                                     <td style={styles.td}>{u.email || '—'}</td>

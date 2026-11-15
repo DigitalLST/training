@@ -17,6 +17,7 @@ type Demande = {
     idScout?: string;
     firstName?: string;
     lastName?: string;
+    whatsapp?: string | null;
     region?: string;
   };
   branche: string;
@@ -622,6 +623,7 @@ export default function ListeParticipants(): React.JSX.Element {
               <th style={styles.thRight}>المعرف الكشفي</th>
               <th style={styles.thRight}>الإسم</th>
               <th style={styles.thRight}>اللقب</th>
+              <th style={styles.thRight}>رقم الهاتف</th>
               <th style={styles.thRight}>الجهة</th>
               <th style={styles.thRight}>القسم</th>
 
@@ -653,6 +655,10 @@ export default function ListeParticipants(): React.JSX.Element {
                   {d.applicantSnapshot.lastName || '—'}
                 </td>
 
+                <td style={{ ...styles.tdRight, direction: 'ltr', textAlign: 'right' }}>
+                  {d.applicantSnapshot.whatsapp || '—'}
+                </td>
+
                 <td style={styles.tdRight}>
                   {d.applicantSnapshot.region || '—'}
                 </td>
@@ -676,7 +682,7 @@ export default function ListeParticipants(): React.JSX.Element {
             {!filteredSorted.length && !loading && (
               <tr>
                 <td
-                  colSpan={8 + snapshotCols.length}
+                  colSpan={9 + snapshotCols.length}
                   style={{ textAlign: 'center', color: '#777', padding: 20 }}
                 >
                   لا توجد مطالب مطابقة.

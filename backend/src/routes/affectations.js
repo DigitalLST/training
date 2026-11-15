@@ -33,9 +33,10 @@ function norm(v) {
     .trim();
 }
 
-/* -------------------------------------------------------------
-   GET /affectations/formations/:formationId/affectations
-------------------------------------------------------------- */
+
+/* ---------- Liste des affectations d'une formation ----------
+   GET /api/affectations/formations/:formationId/affectations
+-------------------------------------------------------------- */
 router.get(
   '/formations/:formationId/affectations',
   requireAuth,
@@ -57,11 +58,13 @@ router.get(
 
       const sessionId = formation.session;
 
-      const rows = await FormationAffectation.find({ formation: formationId })
+      const rows = await FormationAffectation.find({
+        formation: formationId,
+      })
         .select('_id user role isPresent')
         .populate({
           path: 'user',
-          select: '_id prenom nom email idScout region niveau',
+          select: '_id prenom nom email idScout region niveau whatsapp',
         })
         .lean();
 
@@ -70,23 +73,29 @@ router.get(
         .map(r => r.user._id);
 
       if (traineeUserIds.length === 0) {
-        return res.json(rows.map(r => ({
-          _id: String(r._id),
-          role: r.role,
-          isPresent: !!r.isPresent,
-          user: r.user ? {
-            _id: String(r.user._id),
-            prenom: r.user.prenom,
-            nom: r.user.nom,
-            email: r.user.email,
-            idScout: r.user.idScout,
-            region: r.user.region || null,
-            certifsSnapshot: [],
-          } : null,
-        })));
+        return res.json(
+          rows.map(r => ({
+            _id: String(r._id),
+            role: r.role,
+            isPresent: !!r.isPresent,
+            user: r.user
+              ? {
+                  _id: String(r.user._id),
+                  prenom: r.user.prenom,
+                  nom: r.user.nom,
+                  email: r.user.email,
+                  idScout: r.user.idScout,
+                  region: r.user.region || null,
+                  whatsapp: r.user.whatsapp || null,
+                  certifsSnapshot: [],
+                }
+              : null,
+          }))
+        );
       }
 
       let demandes = [];
+
       if (sessionId) {
         demandes = await Demande.find({
           applicant: { $in: traineeUserIds },
@@ -97,8 +106,10 @@ router.get(
       }
 
       const snapshotByUser = new Map();
+
       for (const d of demandes) {
         const uid = String(d.applicant);
+
         const snaps = Array.isArray(d.certifsSnapshot)
           ? d.certifsSnapshot.map(c => ({
               code: c.code,
@@ -106,18 +117,22 @@ router.get(
               label: c.label,
             }))
           : [];
+
         snapshotByUser.set(uid, snaps);
       }
 
       const payload = rows.map(r => {
-        if (!r.user) return {
-          _id: String(r._id),
-          role: r.role,
-          isPresent: !!r.isPresent,
-          user: null,
-        };
+        if (!r.user) {
+          return {
+            _id: String(r._id),
+            role: r.role,
+            isPresent: !!r.isPresent,
+            user: null,
+          };
+        }
 
         const uid = String(r.user._id);
+
         return {
           _id: String(r._id),
           role: r.role,
@@ -129,20 +144,27 @@ router.get(
             email: r.user.email,
             idScout: r.user.idScout,
             region: r.user.region || null,
-            certifsSnapshot: r.role === 'trainee'
-              ? (snapshotByUser.get(uid) || [])
-              : [],
+            whatsapp: r.user.whatsapp || null,
+            certifsSnapshot:
+              r.role === 'trainee'
+                ? snapshotByUser.get(uid) || []
+                : [],
           },
         };
       });
 
       return res.json(payload);
     } catch (err) {
-      console.error('GET /affectations/formations/:formationId/affectations ERROR', err);
+      console.error(
+        'GET /affectations/formations/:formationId/affectations ERROR',
+        err
+      );
+
       return res.status(500).json({ error: 'Erreur serveur' });
     }
   }
 );
+
 /* -------------------------------------------------------------
    GET /affectations/formations/:formationId/candidates
 ------------------------------------------------------------- */

@@ -301,6 +301,7 @@ router.patch('/:id/national', requireAuth, async (req, res, next) => {
   }
 });
 
+
 /* ---------- Liste des demandes d'une session ----------
   GET /api/demandes?sessionId=...&trainingLevel=...&skip=0&limit=100
 -------------------------------------------------------- */
@@ -323,6 +324,17 @@ router.get('/', requireAuth, async (req, res, next) => {
     ]);
 
     const userIds = list.map(d => d.applicant).filter(Boolean);
+
+    // WhatsApp actuel des utilisateurs
+    const users = await User.find({
+      _id: { $in: userIds },
+    })
+      .select('_id whatsapp')
+      .lean();
+
+    const whatsappByUser = new Map(
+      users.map(u => [String(u._id), u.whatsapp || null])
+    );
 
     const finalDecisions = await FinalDecision.find({
       trainee: { $in: userIds },
@@ -384,7 +396,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       const byCode = certifsByUser.get(userKey);
       const existing = byCode.get(code);
 
-      // garder la session la plus récente pour ce user + ce niveau
+      // Garder la session la plus récente pour ce user + ce niveau
       if (!existing || new Date(date) > new Date(existing.date)) {
         byCode.set(code, {
           code,
@@ -420,6 +432,10 @@ router.get('/', requireAuth, async (req, res, next) => {
 
       return {
         ...d,
+        applicantSnapshot: {
+          ...d.applicantSnapshot,
+          whatsapp: whatsappByUser.get(String(d.applicant)) || null,
+        },
         certifsSnapshot: Array.from(merged.values()),
       };
     });
@@ -429,6 +445,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
 
 /**
  * POST /api/demandes/resync-page
@@ -564,8 +581,8 @@ router.post('/resync-affectations', requireAuth, async (req, res, next) => {
 });
 
 /* ---------- GET /api/demandes/regional ----------
-   ✅ renvoie les demandes visibles + flags UI (_ui)
--------------------------------------------- */
+   Renvoie les demandes visibles + flags UI (_ui)
+------------------------------------------------ */
 router.get('/regional', requireAuth, async (req, res, next) => {
   try {
     const { sessionId, trainingLevel } = req.query;
@@ -589,7 +606,9 @@ router.get('/regional', requireAuth, async (req, res, next) => {
 
     if (!s) return res.status(404).json({ error: 'Session not found' });
 
-    const organizer = normalize(s.organizer || s.organizerRegion || s.organizerName);
+    const organizer = normalize(
+      s.organizer || s.organizerRegion || s.organizerName
+    );
 
     const filt = { session: sessionId };
     if (trainingLevel) filt.trainingLevel = trainingLevel;
@@ -613,6 +632,17 @@ router.get('/regional', requireAuth, async (req, res, next) => {
     ]);
 
     const userIds = list.map(d => d.applicant).filter(Boolean);
+
+    // WhatsApp actuel des utilisateurs
+    const users = await User.find({
+      _id: { $in: userIds },
+    })
+      .select('_id whatsapp')
+      .lean();
+
+    const whatsappByUser = new Map(
+      users.map(u => [String(u._id), u.whatsapp || null])
+    );
 
     const finalDecisions = await FinalDecision.find({
       trainee: { $in: userIds },
@@ -696,7 +726,8 @@ router.get('/regional', requireAuth, async (req, res, next) => {
 
       const canSetNational = excluded
         ? national
-        : national || (isRegionalMod && userReg && organizer && userReg === organizer);
+        : national ||
+          (isRegionalMod && userReg && organizer && userReg === organizer);
 
       const existingCertifs = Array.isArray(d.certifsSnapshot)
         ? d.certifsSnapshot
@@ -723,6 +754,10 @@ router.get('/regional', requireAuth, async (req, res, next) => {
 
       return {
         ...d,
+        applicantSnapshot: {
+          ...d.applicantSnapshot,
+          whatsapp: whatsappByUser.get(String(d.applicant)) || null,
+        },
         certifsSnapshot: Array.from(mergedCertifs.values()),
         _ui: {
           level: lvl,
@@ -739,6 +774,7 @@ router.get('/regional', requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
 
 /* ---------- POST /api/demandes/regional/resync-page ----------
    (inchangé, mais garde la visibilité identique à /regional)

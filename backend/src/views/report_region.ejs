@@ -1,152 +1,108 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="UTF-8" />
-  <style>
-    body {
-      font-family: "Amiri", serif;
-      direction: rtl;
-      text-align: right;
-      margin: 20px;
-    }
-
-    .header-logo {
-      text-align: center;
-      margin-bottom: 10px;
-    }
-
-    .header-logo img {
-      width: 120px;
-    }
-
-    .title {
-      text-align: center;
-      font-size: 22px;
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-
-    .subtitle {
-      text-align: center;
-      font-size: 20px;
-      font-weight: bold;
-      margin-bottom: 2px;
-    }
-
-    .sub_subtitle {
-      text-align: center;
-      font-size: 18px;
-      margin-bottom: 2px;
-    }
-
-    .section-title {
-      font-size: 18px;
-      font-weight: bold;
-      margin-top: 24px;
-      margin-bottom: 8px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 8px;
-      font-size: 12px;
-    }
-
-    th, td {
-      border: 1px solid #999;
-      padding: 5px;
-      text-align: center;
-    }
-
-    th {
-      background: #f1f1f1;
-    }
-
-    .page-break {
-      page-break-before: always;
-    }
-  </style>
+<meta charset="UTF-8" />
+<style>
+body { font-family: "Amiri", serif; direction: rtl; text-align: right; margin: 20px; padding-bottom: 45mm; }
+.cn-footer { position: fixed; bottom: 8mm; left: 12mm; z-index: 9999; display: flex; gap: 8mm; align-items: flex-end; direction: ltr; }
+.cn-footer .sig { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.cn-footer img { width: 45px; height: auto; opacity: .95; }
+.header-logo { text-align: center; margin-bottom: 10px; }
+.header-logo img { width: 120px; }
+.title { text-align: center; font-size: 22px; font-weight: bold; margin-bottom: 4px; }
+.subtitle { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 2px; }
+.sub_subtitle { text-align: center; font-size: 18px; margin-bottom: 2px; }
+.section-title { font-size: 18px; font-weight: bold; margin-top: 24px; margin-bottom: 8px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; page-break-inside: auto; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; page-break-after: auto; }
+th, td { border: 1px solid #999; padding: 4px 6px; text-align: center; vertical-align: middle; }
+th { background-color: #f1f1f1; font-weight: bold; }
+.page-break { page-break-before: always; }
+.muted { text-align: center; margin-top: 16px; color: #666; font-size: 13px; }
+.phone-cell { direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+</style>
 </head>
 <body>
-
-  <div class="header-logo">
-    <% if (logoDataUrl) { %>
-      <img src="<%= logoDataUrl %>" />
-    <% } %>
+<%
+const labelDecision = (decision) => {
+  if (decision === 'success') return 'يؤهل';
+  if (decision === 'retake') return 'يعيد الدورة';
+  if (decision === 'incompatible') return 'لا يناسب الدور';
+  return '—';
+};
+const toArDate = (d) => {
+  if (!d) return '';
+  const dd = new Date(d);
+  if (Number.isNaN(dd.getTime())) return '';
+  return dd.toLocaleDateString('ar-TN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+};
+const PERIOD = (() => {
+  const s = session && session.startDate ? toArDate(session.startDate) : '';
+  const e = session && session.endDate ? toArDate(session.endDate) : '';
+  if (!s && !e) return '';
+  return `من ${s} إلى ${e}`;
+})();
+const LEVELS = ['تمهيدية', 'شارة خشبية'];
+const sbl = Array.isArray(statsByLevel) ? statsByLevel : [];
+const mapStats = new Map(sbl.map(x => [String(x.trainingLevel || ''), x]));
+const providedPages = Array.isArray(pages) ? pages : null;
+const makePage = (bucket, lvl, title, list) => ({ bucket, trainingLevel: lvl, title, trainees: list });
+let resultPages = [];
+if (providedPages && providedPages.length) {
+  for (const lvl of LEVELS) {
+    const p = providedPages.find(x => x && x.bucket === 'success' && x.trainingLevel === lvl);
+    resultPages.push(p || makePage('success', lvl, `النتائج - (${lvl}) - المؤهلون`, []));
+  }
+  for (const lvl of LEVELS) {
+    const p = providedPages.find(x => x && x.bucket === 'nonsuccess' && x.trainingLevel === lvl);
+    resultPages.push(p || makePage('nonsuccess', lvl, `النتائج - (${lvl}) - غير المؤهلين`, []));
+  }
+} else {
+  const all = Array.isArray(trainees) ? trainees : [];
+  const isSuccess = t => t && t.decision === 'success';
+  const isNonSuccess = t => !(t && t.decision === 'success');
+  for (const lvl of LEVELS) resultPages.push(makePage('success', lvl, `النتائج - ${exportRegion || '—'} - (${lvl}) - المؤهلون`, all.filter(t => t.trainingLevel === lvl && isSuccess(t))));
+  for (const lvl of LEVELS) resultPages.push(makePage('nonsuccess', lvl, `النتائج - ${exportRegion || '—'} - (${lvl}) - غير المؤهلين`, all.filter(t => t.trainingLevel === lvl && isNonSuccess(t))));
+}
+const renderHeader = (extraSubtitle) => { %>
+  <div class="header-logo"><% if (logoDataUrl) { %><img src="<%= logoDataUrl %>" /><% } %></div>
+  <div class="title"><%= sessionTitle || (session && session.title) || 'الدورة' %></div>
+  <% if (session && session.organizer) { %><div class="sub_subtitle"><%= session.organizer %></div><% } %>
+  <% if (PERIOD) { %><div class="sub_subtitle"><%= PERIOD %></div><% } %>
+  <div class="subtitle">الجهة : <%= exportRegion || '—' %></div>
+  <% if (extraSubtitle) { %><div class="sub_subtitle"><%= extraSubtitle %></div><% } %>
+<% } %>
+<% if ((cnPresident && cnPresident.signatureDataUrl) || (cnCommissioner && cnCommissioner.signatureDataUrl)) { %>
+  <div class="cn-footer">
+  <% if (cnCommissioner && cnCommissioner.signatureDataUrl) { %><div class="sig"><img src="<%= cnCommissioner.signatureDataUrl %>" alt="commissioner-signature" /></div><% } %>
+  <% if (cnPresident && cnPresident.signatureDataUrl) { %><div class="sig"><img src="<%= cnPresident.signatureDataUrl %>" alt="president-signature" /></div><% } %>
   </div>
-
-  <div class="title"><%= sessionTitle %></div>
-  <div class="subtitle"><%= formationTitle %></div>
-
-  <% if (centreLine) { %>
-    <div class="subtitle"><%= centreLine %></div>
-  <% } %>
-
-  <% if (periodLine) { %>
-    <div class="sub_subtitle"><%= periodLine %></div>
-  <% } %>
-
-  <!-- ÉQUIPE -->
-  <div class="section-title">قيادة الدراسة</div>
-  <table>
-    <thead>
-      <tr>
-        <th>الصفة</th>
-        <th>الاسم واللقب</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% team.forEach(m => { %>
-        <tr>
-          <td><%= m.roleLabel %></td>
-          <td><%= m.prenom %> <%= m.nom %></td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-
-  <!-- PARTICIPANTS -->
-  <div class="section-title">قائمة المشاركين</div>
-
-  <%
-    const PER_PAGE = 30;
-    const chunks = [];
-    for (let i = 0; i < trainees.length; i += PER_PAGE) {
-      chunks.push(trainees.slice(i, i + PER_PAGE));
-    }
-  %>
-
-  <% chunks.forEach((chunk, i) => { %>
-
-    <% if (i > 0) { %>
-      <div class="page-break"></div>
-    <% } %>
-
-    <table>
-      <thead>
-        <tr>
-          <th>المعرف الكشفي</th>
-          <th>الاسم واللقب</th>
-          <th>الجهة</th>
-          <th>البريد</th>
-          <th>القرار</th>
-        </tr>
-      </thead>
-      <tbody>
-        <% chunk.forEach(t => { %>
-          <tr>
-            <td><%= t.idScout || '-' %></td>
-            <td><%= t.prenom %> <%= t.nom %></td>
-            <td><%= t.region %></td>
-            <td><%= t.email %></td>
-            <td>يؤهل</td>
-          </tr>
-        <% }) %>
-      </tbody>
-    </table>
-
-  <% }) %>
-
-</body>
-</html>
+<% } %>
+<% renderHeader(null); %>
+<div class="section-title">إحصائيات عامة</div>
+<table><thead><tr><th>المستوى</th><th>عدد المسجلين</th><th>يؤهل</th><th>لا يؤهل</th></tr></thead><tbody>
+<% LEVELS.forEach(function(lvl) { const st = mapStats.get(lvl) || { total: 0, success: 0, nonsuccess: 0 }; %>
+<tr><td><%= lvl %></td><td><%= st.total || 0 %></td><td><%= st.success || 0 %></td><td><%= st.nonsuccess || 0 %></td></tr>
+<% }) %>
+</tbody></table>
+<% resultPages.forEach(function(p) { %>
+<div class="page-break"></div>
+<% renderHeader(p.title || 'النتائج'); %>
+<%
+const list = Array.isArray(p.trainees) ? p.trainees : [];
+const PER_PAGE = 30;
+const chunks = [];
+for (let i = 0; i < list.length; i += PER_PAGE) chunks.push(list.slice(i, i + PER_PAGE));
+%>
+<% if (!chunks.length) { %><div class="muted">لا توجد بيانات</div><% } %>
+<% chunks.forEach(function(chunk, chunkIdx) { %>
+<% if (chunkIdx > 0) { %><div class="page-break"></div><% renderHeader((p.title || 'النتائج') + ' (تابع)'); %><% } %>
+<table><thead><tr><th>المعرف الكشفي</th><th>الاسم واللقب</th><th>رقم الهاتف</th><th>القسم الفني</th><th>الدراسة</th><th>القرار النهائي</th></tr></thead><tbody>
+<% chunk.forEach(function(t) { %>
+<tr><td><%= t.idScout || '—' %></td><td><%= ((t.prenom || '') + ' ' + (t.nom || '')).trim() || '—' %></td><td class="phone-cell"><%= t.whatsapp || '—' %></td><td><%= t.branche || '—' %></td><td><%= t.formationTitle || '—' %></td><td><%= labelDecision(t.decision) %></td></tr>
+<% }) %>
+</tbody></table>
+<% }) %>
+<% }) %>
+</body></html>

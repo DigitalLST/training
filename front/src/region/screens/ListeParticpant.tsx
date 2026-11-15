@@ -10,7 +10,7 @@ type CertifMini = { title?: string; code?: string; date?: string | null };
 
 type Demande = {
   _id: string;
-  applicantSnapshot: { idScout?: string; firstName?: string; lastName?: string; region?: string };
+  applicantSnapshot: { idScout?: string; firstName?: string; lastName?: string; whatsapp?: string | null; region?: string };
   branche: string;
   trainingLevel?: string;
   statusRegion: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -561,6 +561,7 @@ export default function ListeParticipants(): React.JSX.Element {
               <th style={styles.thRight}>المعرف الكشفي</th>
               <th style={styles.thRight}>الإسم</th>
               <th style={styles.thRight}>اللقب</th>
+              <th style={styles.thRight}>رقم الهاتف</th>
               <th style={styles.thRight}>الجهة</th>
               <th style={styles.thRight}>القسم</th>
 
@@ -583,6 +584,9 @@ export default function ListeParticipants(): React.JSX.Element {
                 <td style={styles.tdRight}>{d.applicantSnapshot.idScout || '—'}</td>
                 <td style={styles.tdRight}>{d.applicantSnapshot.firstName || '—'}</td>
                 <td style={styles.tdRight}>{d.applicantSnapshot.lastName || '—'}</td>
+                <td style={{ ...styles.tdRight, direction: 'ltr', textAlign: 'right' }}>
+                  {d.applicantSnapshot.whatsapp || '—'}
+                </td>
                 <td style={styles.tdRight}>{d.applicantSnapshot.region || '—'}</td>
                 <td style={styles.tdRight}>{d.branche || '—'}</td>
 
@@ -599,7 +603,7 @@ export default function ListeParticipants(): React.JSX.Element {
 
             {!filteredSorted.length && !loading && (
               <tr>
-                <td colSpan={8 + snapshotCols.length} style={{ textAlign: 'center', color: '#777' }}>
+                <td colSpan={9 + snapshotCols.length} style={{ textAlign: 'center', color: '#777' }}>
                   لا توجد مطالب مطابقة.
                 </td>
               </tr>
